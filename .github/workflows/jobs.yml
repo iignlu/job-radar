@@ -1,0 +1,69 @@
+# The scheduled alert run.
+#
+# QUOTA MATHS — this is what keeps the bot on the free tier:
+#   2 queries (config.QUERIES) x 3 runs/day x ~22 working days
+#     = 132 requests/month
+#   JSearch's free plan allows ~200/month, so there is headroom for manual
+#   workflow_dispatch runs and the occasional retry.
+#   Adding a third query pushes it to ~198/month — right at the ceiling. Add a
+#   fourth and you are over it. Change QUERIES and this schedule together.
+name: job-alerts
+
+on:
+  schedule:
+    # 06:00, 11:00 and 16:00 UTC, Sunday–Thursday.
+    # Saudi Arabia is UTC+3 -> 09:00, 14:00 and 19:00 local, on the Saudi
+    # working week. GitHub cron is always UTC and has no timezone option.
+    - cron: "0 6,11,16 * * 0-4"
+  workflow_dispatch:
+
+# Needed to commit seen.json back to the repository.
+permissions:
+  contents: write
+
+concurrency:
+  # seen.json is the bot's whole memory and it lives in git. Two runs racing
+  # would have one clobber the other's state and re-send everything it lost.
+  group: job-alerts
+  cancel-in-progress: false
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # No install step: the project is standard-library-only by design.
+
+      - name: Run job-radar
+        env:
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m jobradar
+
+      - name: Commit seen.json
+        run: |
+          set -euo pipefail
+
+          if [ -z "$(git status --porcelain seen.json)" ]; then
+            echo "seen.json unchanged - nothing to commit"
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add seen.json
+          git commit -m "chore: update seen.json [skip ci]"
+
+          # Another run may have pushed while this one was talking to the API.
+          # --autostash keeps the rebase clean if anything else is dirty.
+          git pull --rebase --autostash
+          git push

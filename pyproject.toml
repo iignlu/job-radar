@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "job-radar"
+version = "0.1.0"
+description = "Graduate job alerts for Saudi Arabia, delivered to Telegram."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+
+# Intentionally empty and intended to stay that way. The project runs on a
+# bare GitHub Actions runner with no install step; adding a dependency here
+# means adding a pip install to every workflow.
+dependencies = []
+
+[project.scripts]
+jobradar = "jobradar.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["jobradar*"]
