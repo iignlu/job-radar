@@ -9,7 +9,8 @@ import argparse
 
 from . import config, log
 from .filters import evaluate
-from .notify import Telegram
+from .notify import ChatIdUnavailable, Telegram, describe_bot, resolve_chat_id
+from .sources.demo import DemoSource
 from .sources.jsearch import JSearchSource
 from .state import SeenStore
 
@@ -40,6 +41,18 @@ def parse_args(argv=None) -> argparse.Namespace:
         help=f"max messages this run (default: {config.MAX_MESSAGES_PER_RUN})",
     )
     parser.add_argument("--verbose", action="store_true", help="debug logging")
+    parser.add_argument(
+        "--demo", action="store_true",
+        help="use built-in fixture postings instead of the API; no key needed",
+    )
+    parser.add_argument(
+        "--doctor", action="store_true",
+        help="check credentials and connectivity, then exit",
+    )
+    parser.add_argument(
+        "--resolve-chat-id", action="store_true",
+        help="print your Telegram chat id (from getUpdates) and exit",
+    )
     return parser.parse_args(argv)
 
 
@@ -56,6 +69,10 @@ def build_sources(args) -> list:
     aggregator sees what companies syndicate, an ATS sees everything the
     company posts, often hours earlier.
     """
+    if args.demo:
+        # Fixtures — no key, no network, no quota consumed.
+        return [DemoSource()]
+
     sources = [
         JSearchSource(
             api_key=config.env("RAPIDAPI_KEY"),
@@ -74,10 +91,92 @@ def _sort_key(pair):
     return job.posted_at or ""
 
 
+def doctor() -> int:
+    """Check every credential independently and report precisely what is wrong.
+
+    Written so the output tells you the next action, not just that something
+    failed — a 401 from RapidAPI and a 429 from RapidAPI need opposite fixes.
+    """
+    from .http import HttpError
+    from .sources.jsearch import API_HOST, API_URL
+    from . import http as _http
+
+    problems = 0
+
+    # --- Telegram token
+    token = config.env("TELEGRAM_TOKEN", required=False)
+    if not token:
+        print("FAIL  TELEGRAM_TOKEN is not set (get one from @BotFather)")
+        problems += 1
+    else:
+        try:
+            bot = describe_bot(token)
+            print(f"OK    TELEGRAM_TOKEN valid — bot is @{bot.get('username', '?')}")
+        except HttpError as exc:
+            print(f"FAIL  TELEGRAM_TOKEN rejected by Telegram: {exc}")
+            problems += 1
+            token = ""
+
+    # --- Telegram chat id
+    chat_id = config.env("TELEGRAM_CHAT_ID", required=False)
+    if chat_id:
+        print(f"OK    TELEGRAM_CHAT_ID set explicitly ({chat_id})")
+    elif token:
+        try:
+            resolved = resolve_chat_id(token)
+            print(f"OK    TELEGRAM_CHAT_ID not set, but resolved from getUpdates: {resolved}")
+            print("      Set it as a secret to avoid resolving it every run.")
+        except (ChatIdUnavailable, HttpError) as exc:
+            print(f"FAIL  could not resolve a chat id: {exc}")
+            problems += 1
+
+    # --- RapidAPI. Costs one request, so it is called out explicitly.
+    key = config.env("RAPIDAPI_KEY", required=False)
+    if not key:
+        print("FAIL  RAPIDAPI_KEY is not set (rapidapi.com → JSearch → Basic plan)")
+        problems += 1
+    else:
+        try:
+            payload = _http.get_json(
+                API_URL,
+                params={"query": "software engineer", "page": 1, "num_pages": 1,
+                        "country": config.COUNTRY, "date_posted": "week"},
+                headers={"X-RapidAPI-Key": key, "X-RapidAPI-Host": API_HOST},
+                retries=1,
+            )
+            count = len(payload.get("data") or [])
+            print(f"OK    RAPIDAPI_KEY valid — test query returned {count} posting(s)")
+            print("      (that check consumed 1 of your ~200 monthly requests)")
+        except HttpError as exc:
+            if exc.is_auth_failure:
+                print(f"FAIL  RAPIDAPI_KEY rejected — bad key, or not subscribed to "
+                      f"JSearch on rapidapi.com ({exc.status})")
+            elif exc.is_quota_failure:
+                print(f"FAIL  RAPIDAPI_KEY rate limited or monthly quota exhausted ({exc.status})")
+            else:
+                print(f"FAIL  RapidAPI request failed: {exc}")
+            problems += 1
+
+    print()
+    print("all checks passed" if not problems else f"{problems} problem(s) found")
+    return 0 if not problems else 1
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     log.setup(verbose=args.verbose)
     config.load_dotenv()
+
+    if args.doctor:
+        return doctor()
+
+    if args.resolve_chat_id:
+        try:
+            print(resolve_chat_id(config.env("TELEGRAM_TOKEN")))
+            return 0
+        except (ChatIdUnavailable, config.MissingSetting) as exc:
+            _log.error("%s", exc)
+            return 2
 
     limit = args.limit if args.limit is not None else config.MAX_MESSAGES_PER_RUN
 
@@ -86,10 +185,22 @@ def main(argv=None) -> int:
     try:
         sources = build_sources(args)
         token = config.env("TELEGRAM_TOKEN", required=not args.dry_run)
-        chat_id = config.env("TELEGRAM_CHAT_ID", required=not args.dry_run)
+        chat_id = config.env("TELEGRAM_CHAT_ID", required=False)
     except config.MissingSetting as exc:
         _log.error("%s", exc)
         return 2
+
+    # Chat id is optional config: if it is absent we derive it from the bot's
+    # own updates. One less secret to set up, and it works identically on the
+    # Actions runner. Explicitly-set values always win.
+    if not chat_id and token and not args.dry_run:
+        try:
+            chat_id = resolve_chat_id(token)
+            _log.info("resolved TELEGRAM_CHAT_ID=%s from getUpdates", chat_id)
+            _log.info("set it as a repository secret to skip this lookup in future")
+        except ChatIdUnavailable as exc:
+            _log.error("%s", exc)
+            return 2
 
     telegram = Telegram(token, chat_id, dry_run=args.dry_run)
 

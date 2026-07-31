@@ -33,15 +33,20 @@ One legitimate aggregator beats three brittle scrapers and a banned account.
 2. Pick a name and a username. BotFather replies with a token that looks like
    `123456789:AAH...`. That is `TELEGRAM_TOKEN`.
 3. **Send your new bot any message** — say "hi". This matters: Telegram will
-   not reveal a chat id until the chat exists.
-4. Fetch your chat id:
+   not reveal a chat id until the chat exists, so skipping this is the single
+   most common setup failure.
+4. You do **not** have to look up your chat id. If `TELEGRAM_CHAT_ID` is unset,
+   the bot derives it from `getUpdates` itself on every run.
+
+   To pin it explicitly (more robust — `getUpdates` only retains ~24h of
+   history), run:
 
    ```bash
-   curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates"
+   python -m jobradar --resolve-chat-id
    ```
 
-   Read `result[0].message.chat.id` from the JSON. That is
-   `TELEGRAM_CHAT_ID`. If `result` is an empty array, you skipped step 3.
+   or open `https://api.telegram.org/bot<TOKEN>/getUpdates` in a browser and
+   read `result[0].message.chat.id`.
 
 ### 2. RapidAPI key
 
@@ -62,21 +67,49 @@ cp .env.example .env
 
 ### 4. Try it without sending anything
 
+No credentials needed — fixture postings, no network, no quota:
+
+```bash
+python -m jobradar --demo --dry-run --show-rejected
+```
+
+Check your credentials are actually good:
+
+```bash
+python -m jobradar --doctor
+```
+
+Then a real dry run against the live API:
+
 ```bash
 python -m jobradar --dry-run --show-rejected --date-posted week
 ```
 
 ### 5. Ship it
 
+Push to a private repo, then add the secrets.
+
+With the `gh` CLI:
+
 ```bash
 gh repo create job-radar --private --source=. --push
-
 gh secret set RAPIDAPI_KEY
 gh secret set TELEGRAM_TOKEN
-gh secret set TELEGRAM_CHAT_ID
-
+gh secret set TELEGRAM_CHAT_ID   # optional — see step 4
 gh workflow run job-alerts
 ```
+
+Or entirely in the browser, no CLI needed:
+
+1. **Settings → Secrets and variables → Actions → New repository secret**
+   - `RAPIDAPI_KEY`
+   - `TELEGRAM_TOKEN`
+   - `TELEGRAM_CHAT_ID` *(optional)*
+2. **Actions → job-alerts → Run workflow**
+
+Scheduled runs only fire from the repository's **default branch** — if you
+push this to a side branch, either merge it to the default branch or change
+the default in Settings, or the cron will never trigger.
 
 ---
 
@@ -130,6 +163,9 @@ python -m jobradar [options]
                               override config.DATE_POSTED
 --limit N                     max messages this run (default 12)
 --verbose                     debug logging
+--demo                        use built-in fixture postings; no key, no network
+--doctor                      check credentials and connectivity, then exit
+--resolve-chat-id             print your Telegram chat id and exit
 ```
 
 ---
@@ -194,6 +230,7 @@ jobradar/
     __init__.py
     base.py          Job dataclass + Source ABC
     jsearch.py       JSearch (RapidAPI)
+    demo.py          fixture source for --demo, and a worked extension example
 tests/
   test_filters.py    run: python tests/test_filters.py
 .github/workflows/
