@@ -103,6 +103,15 @@ ALLOW_REMOTE = True
 MAX_MESSAGES_PER_RUN = 12
 
 # --------------------------------------------------------------------------
+# Presentation
+# --------------------------------------------------------------------------
+
+# Footer appended to every Telegram message. Set to "" to switch it off.
+# Plain text — it is HTML-escaped before sending, so apostrophes, & and < are
+# all safe to write literally here.
+SIGNATURE = "Abdullah Alshehri's Job Radar"
+
+# --------------------------------------------------------------------------
 # State
 # --------------------------------------------------------------------------
 

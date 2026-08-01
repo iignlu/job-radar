@@ -193,6 +193,18 @@ Five layers, cheapest first, in `jobradar/filters.py`:
 Everything is tunable in `jobradar/config.py`. That is the only file you should
 need to edit to change what you get alerted about.
 
+## Message signature
+
+Every Telegram message ends with a footer set by `config.SIGNATURE`:
+
+```
+— Abdullah Alshehri's Job Radar
+```
+
+Change the string to reword it, or set it to `""` to switch it off. It is
+HTML-escaped on the way out, so `&`, `<` and apostrophes are safe to type
+literally.
+
 ---
 
 ## Behaviours worth knowing

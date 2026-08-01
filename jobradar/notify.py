@@ -10,7 +10,7 @@ import html
 import time
 from datetime import datetime, timezone
 
-from . import http, log
+from . import config, http, log
 
 _log = log.get(__name__)
 
@@ -98,6 +98,26 @@ def humanise_age(iso: str | None) -> str:
     return f"{int(days / 30)}mo ago"
 
 
+def with_signature(body: str) -> str:
+    """Append the configured signature footer.
+
+    Applied here rather than in format_job so every outgoing message carries
+    it — job alerts, the first-run summary and the deferral note alike — and
+    so there is exactly one place that knows the footer exists.
+
+    The body is trimmed to leave room for the footer, because Telegram rejects
+    the whole message over 4096 characters rather than truncating it.
+    """
+    signature = (config.SIGNATURE or "").strip()
+    if not signature:
+        return body[:MAX_BODY]
+
+    # quote=False keeps apostrophes literal — they are not special in HTML
+    # text content, and "Abdullah&#x27;s" is needless noise in the source.
+    footer = f"\n\n<i>— {html.escape(signature, quote=False)}</i>"
+    return body[: MAX_BODY - len(footer)] + footer
+
+
 def format_job(job, reason: str) -> str:
     """Build the HTML body for one posting."""
     esc = html.escape
@@ -145,6 +165,8 @@ class Telegram:
 
     def send_raw(self, body: str) -> bool:
         """Send one pre-formatted HTML message."""
+        body = with_signature(body)
+
         if self.dry_run:
             # No pause here: dry runs are for reading output, not pacing it.
             print("\n--- telegram (dry-run) " + "-" * 44)

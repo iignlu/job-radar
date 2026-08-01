@@ -166,6 +166,30 @@ check("missing job_id -> None, falls back to content hash",
       _src._stable_id(None) is None and _src._stable_id("") is None)
 
 
+# 12 — signature footer
+from jobradar import config as _config  # noqa: E402
+from jobradar.notify import MAX_BODY, with_signature  # noqa: E402
+
+_signed = with_signature("body")
+check("signature appended", _signed.endswith("<i>— Abdullah Alshehri's Job Radar</i>"), _signed)
+check("apostrophe stays literal, not &#x27;", "&#x27;" not in _signed, _signed)
+
+_original = _config.SIGNATURE
+try:
+    _config.SIGNATURE = ""
+    check("empty signature appends nothing", with_signature("body") == "body")
+
+    _config.SIGNATURE = "A & B <script>"
+    check("signature is HTML-escaped",
+          "A &amp; B &lt;script&gt;" in with_signature("x"), with_signature("x"))
+
+    # Telegram rejects >4096 outright, so the footer must fit inside the cap.
+    _config.SIGNATURE = _original
+    check("oversized body still fits the cap", len(with_signature("x" * 9000)) <= MAX_BODY)
+finally:
+    _config.SIGNATURE = _original
+
+
 if __name__ == "__main__":
     passed = sum(1 for ok, _, _ in _results if ok)
     total = len(_results)
