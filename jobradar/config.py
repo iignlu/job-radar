@@ -33,10 +33,17 @@ JSEARCH_ENDPOINT = "search-v2"
 # anything wider re-fetches the same postings we already marked seen.
 DATE_POSTED = "today"
 
-# JSearch-side pre-filter. Cheaper than filtering locally because it shrinks
-# the response before it reaches us, but it is not reliable enough to trust on
-# its own — plenty of senior roles still come back tagged this way.
-JOB_REQUIREMENTS = "under_3_years_experience,no_experience"
+# JSearch-side pre-filter, e.g. "under_3_years_experience,no_experience".
+#
+# OFF by default. On search-v2 it returned zero results for every query — a
+# full month of Saudi graduate roles came back empty with it set, and the
+# filter layers in filters.py already do this job locally and more carefully.
+# An empty response is indistinguishable from "no jobs today", so a server-side
+# filter that silently matches nothing is worse than no filter at all.
+#
+# Set it back to "under_3_years_experience,no_experience" if you want to shrink
+# responses and have confirmed it actually returns results.
+JOB_REQUIREMENTS = ""
 
 # --------------------------------------------------------------------------
 # Matching — the keyword layers

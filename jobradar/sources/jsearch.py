@@ -59,9 +59,10 @@ class JSearchSource(Source):
         return {"X-RapidAPI-Key": self.api_key, "X-RapidAPI-Host": API_HOST}
 
     def _params(self, query: str) -> dict:
+        # Exactly the params search-v2 documents, and nothing else. v1 also
+        # took `page`; sending it to v2 is at best ignored, so it is gone.
         params = {
             "query": query,
-            "page": 1,
             "num_pages": self.num_pages,
             "country": self.country,
             "date_posted": self.date_posted,
