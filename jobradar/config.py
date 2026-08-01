@@ -22,6 +22,13 @@ QUERIES = [
 
 COUNTRY = "sa"
 
+# JSearch's search path. Lives here because RapidAPI has renamed it before:
+# it was "search", and became "search-v2". When a run starts failing with
+# HTTP 404 {"message": "Endpoint '/...' does not exist"}, the path moved again
+# — open the API's Code Snippets panel on RapidAPI, read the new path, and
+# change this one string.
+JSEARCH_ENDPOINT = "search-v2"
+
 # One of: all | today | 3days | week | month. `today` suits a 3×/day schedule —
 # anything wider re-fetches the same postings we already marked seen.
 DATE_POSTED = "today"

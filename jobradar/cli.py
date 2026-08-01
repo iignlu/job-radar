@@ -98,7 +98,7 @@ def doctor() -> int:
     failed — a 401 from RapidAPI and a 429 from RapidAPI need opposite fixes.
     """
     from .http import HttpError
-    from .sources.jsearch import API_HOST, API_URL
+    from .sources.jsearch import API_HOST, api_url
     from . import http as _http
 
     problems = 0
@@ -138,7 +138,7 @@ def doctor() -> int:
     else:
         try:
             payload = _http.get_json(
-                API_URL,
+                api_url(),
                 params={"query": "software engineer", "page": 1, "num_pages": 1,
                         "country": config.COUNTRY, "date_posted": "week"},
                 headers={"X-RapidAPI-Key": key, "X-RapidAPI-Host": API_HOST},
@@ -153,6 +153,10 @@ def doctor() -> int:
                       f"JSearch on rapidapi.com ({exc.status})")
             elif exc.is_quota_failure:
                 print(f"FAIL  RAPIDAPI_KEY rate limited or monthly quota exhausted ({exc.status})")
+            elif exc.status == 404:
+                print(f"FAIL  endpoint '/{config.JSEARCH_ENDPOINT}' does not exist — RapidAPI "
+                      f"renamed the path. Read the current one from the API's Code Snippets "
+                      f"panel and update config.JSEARCH_ENDPOINT ({exc.status})")
             else:
                 print(f"FAIL  RapidAPI request failed: {exc}")
             problems += 1

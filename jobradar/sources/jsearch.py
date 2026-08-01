@@ -6,14 +6,28 @@ LinkedIn has no public jobs API, and its internal endpoints ban accounts that
 touch them. One legitimate aggregator beats three brittle scrapers.
 """
 
-from .. import http, log
+from .. import config, http, log
 from ..http import HttpError
 from .base import Job, Source
 
 _log = log.get(__name__)
 
-API_URL = "https://jsearch.p.rapidapi.com/search"
 API_HOST = "jsearch.p.rapidapi.com"
+API_BASE = f"https://{API_HOST}"
+
+
+def api_url() -> str:
+    """Full search URL, with the path read from config at call time.
+
+    RapidAPI renames this path between versions ("search" -> "search-v2"), and
+    a rename surfaces as a 404 rather than anything that looks like a version
+    problem, so it is a config value rather than a constant.
+    """
+    return f"{API_BASE}/{config.JSEARCH_ENDPOINT.lstrip('/')}"
+
+
+# Kept as a module attribute for callers that just want the current URL.
+API_URL = api_url()
 
 
 class JSearchSource(Source):
@@ -60,7 +74,7 @@ class JSearchSource(Source):
         for query in self.queries:
             try:
                 payload = http.get_json(
-                    API_URL, params=self._params(query), headers=self._headers()
+                    api_url(), params=self._params(query), headers=self._headers()
                 )
             except HttpError as exc:
                 # One bad query must not kill the run — the other query may
