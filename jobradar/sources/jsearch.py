@@ -48,6 +48,7 @@ class JSearchSource(Source):
         self.date_posted = date_posted
         self.job_requirements = job_requirements
         self.num_pages = num_pages
+        self._shape_logged = False
 
     @property
     def request_cost(self) -> int:
@@ -88,28 +89,99 @@ class JSearchSource(Source):
                     _log.error("query %r failed, skipping: %s", query, exc)
                 continue
 
-            data = payload.get("data") or []
-            _log.info("query %r -> %d posting(s)", query, len(data))
-            for item in data:
+            records = self._records(payload)
+            _log.info("query %r -> %d posting(s)", query, len(records))
+            for item in records:
                 try:
                     jobs.append(self._to_job(item))
                 except Exception as exc:  # one malformed record, not a dead run
                     _log.warning("skipping malformed posting: %s", exc)
         return jobs
 
+    def _records(self, payload: dict) -> list[dict]:
+        """Pull the posting list out of a response.
+
+        v1 returned `data` as a list of postings. search-v2 nests them one
+        level deeper, and iterating the wrapper object silently yields its
+        string keys instead — which shows up as "'str' object has no attribute
+        'get'" rather than anything that points at the response shape. So:
+        accept both layouts, and when neither matches, log the shape rather
+        than a stack trace, because the shape is the only thing you need.
+        """
+        data = payload.get("data")
+
+        if isinstance(data, list):
+            records = data
+        elif isinstance(data, dict):
+            records = None
+            for key, value in data.items():
+                if isinstance(value, list) and (not value or isinstance(value[0], dict)):
+                    if not self._shape_logged:
+                        _log.info("postings are nested under data.%s", key)
+                    records = value
+                    break
+            if records is None:
+                _log.error(
+                    "data is an object with keys %s, none holding a list of postings",
+                    list(data)[:20],
+                )
+                return []
+        elif isinstance(payload.get("jobs"), list):
+            records = payload["jobs"]
+        else:
+            _log.error(
+                "unexpected response shape: top-level keys %s, data is %s",
+                list(payload)[:20], type(data).__name__,
+            )
+            return []
+
+        records = [item for item in records if isinstance(item, dict)]
+
+        # One-time field dump: if the upstream renames fields, this names them
+        # in the log instead of leaving every posting silently half-empty.
+        if records and not self._shape_logged:
+            _log.info("posting fields: %s", ", ".join(sorted(records[0])[:30]))
+            self._shape_logged = True
+
+        return records
+
+    @staticmethod
+    def _pick(item: dict, *names, default=None):
+        """First non-empty value among `names`.
+
+        v1 prefixed every field with `job_`/`employer_`; v2 does not always.
+        Listing both spellings costs one tuple and avoids a whole class of
+        silently-blank alerts when a field is renamed.
+        """
+        for name in names:
+            value = item.get(name)
+            if value not in (None, "", [], {}):
+                return value
+        return default
+
     def _to_job(self, item: dict) -> Job:
+        pick = self._pick
+        employer = item.get("employer") if isinstance(item.get("employer"), dict) else {}
+        location = item.get("location") if isinstance(item.get("location"), dict) else {}
+
         return Job(
-            title=(item.get("job_title") or "").strip(),
-            company=(item.get("employer_name") or "Unknown").strip(),
-            url=item.get("job_apply_link") or "",
+            title=str(pick(item, "job_title", "title", default="")).strip(),
+            company=str(
+                pick(item, "employer_name", "company_name", "company",
+                     default=employer.get("name") or "Unknown")
+            ).strip(),
+            url=pick(item, "job_apply_link", "apply_link", "job_url", "url", default=""),
             source=self.name,
-            description=item.get("job_description") or "",
-            city=item.get("job_city"),
-            country=item.get("job_country"),
-            publisher=item.get("job_publisher"),
-            employment_type=item.get("job_employment_type"),
-            is_remote=bool(item.get("job_is_remote")),
-            posted_at=item.get("job_posted_at_datetime_utc"),
-            native_id=item.get("job_id"),
+            description=pick(item, "job_description", "description", default=""),
+            city=pick(item, "job_city", "city", default=location.get("city")),
+            country=pick(item, "job_country", "country", default=location.get("country")),
+            publisher=pick(item, "job_publisher", "publisher", "source"),
+            employment_type=pick(item, "job_employment_type", "employment_type"),
+            is_remote=bool(pick(item, "job_is_remote", "is_remote", default=False)),
+            posted_at=pick(
+                item, "job_posted_at_datetime_utc", "job_posted_at",
+                "posted_at_datetime_utc", "posted_at",
+            ),
+            native_id=pick(item, "job_id", "id"),
             raw=item,
         )
