@@ -121,6 +121,51 @@ check(
 )
 
 
+# 11 — JSearch job_ids carry a per-request suffix that must not reach the key.
+# These two ids are real, captured from consecutive live runs: same posting,
+# different suffix. Before the fix they produced different keys and the job was
+# alerted twice.
+from jobradar.sources.jsearch import JSearchSource  # noqa: E402
+
+import base64  # noqa: E402
+
+_src = JSearchSource("key", ["q"])
+
+
+def _fake_id(identity: str, context: str) -> str:
+    """Build an id the way JSearch does: base64("<identity>:<context>")."""
+    return base64.b64encode(f"{identity}:{context}".encode()).decode()
+
+
+_run1 = _fake_id("RBa7oJ_YUE5VPcBSAAAAAA==", "EswBCowBQUppVDR0SjRrbmcz")
+_run2 = _fake_id("RBa7oJ_YUE5VPcBSAAAAAA==", "EssBCowBQUppVDR0S0duRTA5")
+
+check(
+    "request context stripped from job_id",
+    _src._stable_id(_run1) == _src._stable_id(_run2) == "RBa7oJ_YUE5VPcBSAAAAAA==",
+    f"{_src._stable_id(_run1)} vs {_src._stable_id(_run2)}",
+)
+
+_a = _src._to_job({"job_id": _run1, "job_title": "Grad Engineer", "employer_name": "X"})
+_b = _src._to_job({"job_id": _run2, "job_title": "Grad Engineer", "employer_name": "X"})
+check("same posting across runs -> same key", _a.key == _b.key, f"{_a.key} vs {_b.key}")
+
+check(
+    "distinct postings keep distinct keys",
+    _src._stable_id(_fake_id("AAA==", "ctx")) != _src._stable_id(_fake_id("BBB==", "ctx")),
+)
+
+# Real id captured from a live run — the exact value that caused a duplicate.
+_REAL = ("UkJhN29KX1lVRTVWUGNCU0FBQUFBQT09OkVzd0JDb3dCUVVwcFZEUjBTalJyYm1jelJqQnlZbmRx"
+         "TFZGNVlWSjRXRFp6Ym1GRUxUaFViVXhpVFRreFlXUXpWRzVYY0RNMmNqaEJRMlpaUjBGVlNVRnE")
+check("real captured id reduces to its identity half",
+      _src._stable_id(_REAL) == "RBa7oJ_YUE5VPcBSAAAAAA==", _src._stable_id(_REAL))
+
+check("non-base64 id passes through unchanged", _src._stable_id("plain-id-123") == "plain-id-123")
+check("missing job_id -> None, falls back to content hash",
+      _src._stable_id(None) is None and _src._stable_id("") is None)
+
+
 if __name__ == "__main__":
     passed = sum(1 for ok, _, _ in _results if ok)
     total = len(_results)

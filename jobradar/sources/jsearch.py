@@ -6,6 +6,8 @@ LinkedIn has no public jobs API, and its internal endpoints ban accounts that
 touch them. One legitimate aggregator beats three brittle scrapers.
 """
 
+import base64
+
 from .. import config, http, log
 from ..http import HttpError
 from .base import Job, Source
@@ -147,6 +149,33 @@ class JSearchSource(Source):
         return records
 
     @staticmethod
+    def _stable_id(job_id) -> str | None:
+        """Reduce a JSearch job_id to the part that identifies the posting.
+
+        job_id is base64. Decoded, it is "<job-identity>:<request-context>",
+        and only the first half is stable — the second half changes on every
+        request. Observed live: the same posting came back minutes apart as
+        two different ids that decoded to the same identity but different
+        context, so dedup missed it and the job was alerted twice.
+
+        Left unfixed this re-notifies every job on every run, which is the one
+        failure mode that makes the whole bot worth muting.
+
+        Anything that is not base64, or decodes without a colon, is passed
+        through untouched — a future id format should degrade to today's
+        behaviour rather than to an exception.
+        """
+        if not job_id:
+            return None
+        raw = str(job_id)
+        try:
+            decoded = base64.b64decode(raw + "=" * (-len(raw) % 4)).decode("utf-8")
+        except Exception:
+            return raw
+        identity, sep, _context = decoded.partition(":")
+        return identity if (sep and identity) else raw
+
+    @staticmethod
     def _pick(item: dict, *names, default=None):
         """First non-empty value among `names`.
 
@@ -183,6 +212,6 @@ class JSearchSource(Source):
                 item, "job_posted_at_datetime_utc", "job_posted_at",
                 "posted_at_datetime_utc", "posted_at",
             ),
-            native_id=pick(item, "job_id", "id"),
+            native_id=self._stable_id(pick(item, "job_id", "id")),
             raw=item,
         )
