@@ -148,7 +148,10 @@ def format_job(job, reason: str) -> str:
     if job.url:
         lines.append(f'<a href="{esc(job.url, quote=True)}">Apply →</a>')
 
-    body = "\n".join(lines)
+    # Blank line between every row. Telegram renders consecutive lines tightly
+    # enough that a six-line alert reads as one block on a phone; the extra
+    # spacing is what makes each field scannable at a glance.
+    body = "\n\n".join(lines)
     return body[:MAX_BODY]
 
 
