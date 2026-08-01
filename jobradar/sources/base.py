@@ -26,7 +26,38 @@ class Job:
     is_remote: bool = False
     posted_at: str | None = None          # ISO 8601 string, or None if unknown
     native_id: str | None = None          # upstream's own id, when it has one
+
+    # Every route to applying, normalised to {publisher, url, is_direct}.
+    # `is_direct` means the link goes to the employer's own careers page or ATS
+    # rather than an aggregator — which is the difference between filling in a
+    # form and being asked to create an account first.
+    apply_options: list = field(default_factory=list)
+
     raw: dict = field(default_factory=dict, repr=False)
+
+    @property
+    def direct_url(self) -> str | None:
+        """The employer's own apply link, if any source offered one."""
+        for option in self.apply_options:
+            if option.get("is_direct") and option.get("url"):
+                return option["url"]
+        return None
+
+    @property
+    def best_url(self) -> str:
+        """Where to send someone who wants to apply.
+
+        Prefers the employer's own link: aggregator links increasingly sit
+        behind a signup or paywall, and a posting you cannot apply to is worth
+        nothing regardless of how well it matched.
+        """
+        return self.direct_url or self.url
+
+    @property
+    def alternate_options(self) -> list:
+        """Apply routes other than `best_url`, newest-first order preserved."""
+        best = self.best_url
+        return [o for o in self.apply_options if o.get("url") and o["url"] != best]
 
     @property
     def key(self) -> str:

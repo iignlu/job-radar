@@ -190,6 +190,40 @@ finally:
     _config.SIGNATURE = _original
 
 
+# 13 — apply routing: prefer the employer's own link over aggregators
+_gated = {"publisher": "LinkedIn", "url": "https://li/1", "is_direct": False}
+_direct = {"publisher": "Acme Careers", "url": "https://acme.sa/1", "is_direct": True}
+
+_j = job("Graduate Engineer", url="https://li/1", apply_options=[_gated, _direct])
+check("direct_url finds the employer link", _j.direct_url == "https://acme.sa/1", _j.direct_url)
+check("best_url prefers direct over aggregator", _j.best_url == "https://acme.sa/1", _j.best_url)
+check("alternates exclude the chosen link",
+      [o["url"] for o in _j.alternate_options] == ["https://li/1"])
+
+_only_gated = job("Graduate Engineer", url="https://li/2", apply_options=[_gated])
+check("no direct route -> falls back to the aggregator link",
+      _only_gated.direct_url is None and _only_gated.best_url == "https://li/2")
+
+_bare = job("Graduate Engineer", url="https://x/3")
+check("no apply_options at all -> still returns a link", _bare.best_url == "https://x/3")
+
+# The source must fold the top-level link in, and read its own direct flag.
+_parsed = _src._to_job({
+    "job_id": "abc", "job_title": "Grad Engineer", "employer_name": "Acme",
+    "job_apply_link": "https://acme.sa/x", "job_apply_is_direct": True,
+    "apply_options": [{"publisher": "Indeed", "apply_link": "https://in/x", "is_direct": False}],
+})
+check("source marks top-level link direct when flagged",
+      _parsed.best_url == "https://acme.sa/x", _parsed.best_url)
+check("source keeps the aggregator as an alternate",
+      [o["publisher"] for o in _parsed.alternate_options] == ["Indeed"],
+      _parsed.alternate_options)
+check("malformed apply_options ignored, not fatal",
+      _src._to_job({"job_id": "z", "job_title": "T", "employer_name": "E",
+                    "job_apply_link": "https://z", "apply_options": "nonsense"}).best_url
+      == "https://z")
+
+
 if __name__ == "__main__":
     passed = sum(1 for ok, _, _ in _results if ok)
     total = len(_results)

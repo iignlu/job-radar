@@ -51,6 +51,7 @@ class JSearchSource(Source):
         self.job_requirements = job_requirements
         self.num_pages = num_pages
         self._shape_logged = False
+        self._options_logged = False
 
     @property
     def request_cost(self) -> int:
@@ -189,10 +190,54 @@ class JSearchSource(Source):
                 return value
         return default
 
+    def _apply_options(self, item: dict) -> list:
+        """Normalise every apply route the posting offers.
+
+        Written defensively and logged once, because guessing at an upstream
+        structure is exactly what produced the duplicate-alert bug: the shape
+        is reported rather than assumed.
+        """
+        raw = item.get("apply_options")
+        if not isinstance(raw, list):
+            return []
+
+        options = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            if not self._options_logged:
+                _log.info("apply_options fields: %s", ", ".join(sorted(entry)))
+                self._options_logged = True
+            url = self._pick(entry, "apply_link", "url", "link")
+            if not url:
+                continue
+            options.append({
+                "publisher": self._pick(entry, "publisher", "name", "source"),
+                "url": url,
+                "is_direct": bool(self._pick(entry, "is_direct", "direct", default=False)),
+            })
+
+        # Employer-run routes first, so best_url picks one without re-scanning.
+        options.sort(key=lambda o: not o["is_direct"])
+        return options
+
     def _to_job(self, item: dict) -> Job:
         pick = self._pick
         employer = item.get("employer") if isinstance(item.get("employer"), dict) else {}
         location = item.get("location") if isinstance(item.get("location"), dict) else {}
+
+        options = self._apply_options(item)
+        primary = pick(item, "job_apply_link", "apply_link", "job_url", "url", default="")
+
+        # The top-level link has its own is_direct flag; fold it in so a posting
+        # with no apply_options array still reports a direct route correctly.
+        if primary and not any(o["url"] == primary for o in options):
+            options.append({
+                "publisher": pick(item, "job_publisher", "publisher"),
+                "url": primary,
+                "is_direct": bool(pick(item, "job_apply_is_direct", "is_direct", default=False)),
+            })
+            options.sort(key=lambda o: not o["is_direct"])
 
         return Job(
             title=str(pick(item, "job_title", "title", default="")).strip(),
@@ -200,7 +245,8 @@ class JSearchSource(Source):
                 pick(item, "employer_name", "company_name", "company",
                      default=employer.get("name") or "Unknown")
             ).strip(),
-            url=pick(item, "job_apply_link", "apply_link", "job_url", "url", default=""),
+            url=primary,
+            apply_options=options,
             source=self.name,
             description=pick(item, "job_description", "description", default=""),
             city=pick(item, "job_city", "city", default=location.get("city")),

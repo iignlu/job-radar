@@ -106,6 +106,16 @@ MAX_MESSAGES_PER_RUN = 12
 # Presentation
 # --------------------------------------------------------------------------
 
+# Aggregator apply links (LinkedIn, Indeed, ZipRecruiter…) increasingly sit
+# behind a signup or a paid plan, so a posting can match perfectly and still be
+# unapplicable. When a posting offers the employer's own careers page or ATS,
+# lead with that instead.
+PREFER_DIRECT_APPLY = True
+
+# Also list the other routes, so a gated primary link is not a dead end.
+# 0 switches the alternates line off.
+MAX_ALTERNATE_APPLY_LINKS = 3
+
 # Footer appended to every Telegram message. Set to "" to switch it off.
 # Plain text — it is HTML-escaped before sending, so apostrophes, & and < are
 # all safe to write literally here.

@@ -118,6 +118,32 @@ def with_signature(body: str) -> str:
     return body[: MAX_BODY - len(footer)] + footer
 
 
+def _apply_lines(job, esc) -> list:
+    """The apply row(s): lead with the employer's own link when there is one.
+
+    Says which kind of link it is, because the useful thing to know before
+    tapping is whether you are about to be asked to create an account.
+    """
+    primary = job.best_url if config.PREFER_DIRECT_APPLY else job.url
+    if not primary:
+        return []
+
+    is_direct = bool(job.direct_url) and primary == job.direct_url
+    label = "Apply on company site →" if is_direct else "Apply →"
+    lines = [f'<a href="{esc(primary, quote=True)}">{label}</a>']
+
+    limit = config.MAX_ALTERNATE_APPLY_LINKS
+    if limit:
+        alternates = [
+            f'<a href="{esc(o["url"], quote=True)}">{esc(o["publisher"] or "link")}</a>'
+            for o in job.alternate_options[:limit]
+        ]
+        if alternates:
+            lines.append("↪ also: " + " · ".join(alternates))
+
+    return lines
+
+
 def format_job(job, reason: str) -> str:
     """Build the HTML body for one posting."""
     esc = html.escape
@@ -145,8 +171,7 @@ def format_job(job, reason: str) -> str:
 
     lines.append(f"✅ <i>{esc(reason)}</i>")
 
-    if job.url:
-        lines.append(f'<a href="{esc(job.url, quote=True)}">Apply →</a>')
+    lines.extend(_apply_lines(job, esc))
 
     # Blank line between every row. Telegram renders consecutive lines tightly
     # enough that a six-line alert reads as one block on a phone; the extra

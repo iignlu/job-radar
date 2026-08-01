@@ -19,6 +19,12 @@ _FIXTURES = [
         "desc": "Join our 2026 graduate programme in Riyadh. You will work "
                 "across Python and SQL with a mentor. No prior experience required.",
         "city": "Riyadh", "remote": False, "hours": 2,
+        # Direct route plus two gated aggregators — the common real shape.
+        "options": [
+            {"publisher": "LinkedIn", "url": "https://linkedin.com/jobs/0", "is_direct": False},
+            {"publisher": "Elm Careers", "url": "https://elm.sa/careers/0", "is_direct": True},
+            {"publisher": "Indeed", "url": "https://indeed.com/j/0", "is_direct": False},
+        ],
     },
     {
         "title": "Junior Data Analyst",
@@ -96,6 +102,9 @@ class DemoSource(Source):
                     is_remote=row["remote"],
                     posted_at=posted,
                     native_id=f"demo{index}",
+                    apply_options=sorted(
+                        row.get("options", []), key=lambda o: not o["is_direct"]
+                    ),
                 )
             )
         return jobs
