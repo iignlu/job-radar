@@ -15,7 +15,22 @@ on:
     # Saudi Arabia is UTC+3 -> 09:00, 14:00 and 19:00 local, on the Saudi
     # working week. GitHub cron is always UTC and has no timezone option.
     - cron: "0 6,11,16 * * 0-4"
+
+  # Manual runs can widen the window without touching config. Useful on a
+  # Friday/Saturday, when "today" is legitimately empty because the Saudi
+  # working week has not started — an empty run is indistinguishable from a
+  # broken one until you look further back.
   workflow_dispatch:
+    inputs:
+      date_posted:
+        description: "How far back to search (blank = config default)"
+        type: choice
+        default: ""
+        options: ["", "today", "3days", "week", "month", "all"]
+      limit:
+        description: "Max messages this run (blank = config default)"
+        type: string
+        default: ""
 
 # Needed to commit seen.json back to the repository.
 permissions:
@@ -46,7 +61,16 @@ jobs:
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m jobradar
+          # Empty on scheduled runs, so config.py stays the source of truth.
+          DATE_POSTED: ${{ inputs.date_posted }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          set -euo pipefail
+          args=""
+          [ -n "${DATE_POSTED:-}" ] && args="$args --date-posted $DATE_POSTED"
+          [ -n "${LIMIT:-}" ] && args="$args --limit $LIMIT"
+          echo "running: python -m jobradar $args"
+          python -m jobradar $args
 
       - name: Commit seen.json
         run: |
