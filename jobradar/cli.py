@@ -10,6 +10,7 @@ import argparse
 from . import config, log
 from .filters import evaluate
 from .notify import ChatIdUnavailable, Telegram, describe_bot, resolve_chat_id
+from .sources.ats import ATSSource
 from .sources.demo import DemoSource
 from .sources.jsearch import JSearchSource
 from .state import SeenStore
@@ -73,7 +74,14 @@ def build_sources(args) -> list:
         # Fixtures — no key, no network, no quota consumed.
         return [DemoSource()]
 
-    sources = [
+    sources = []
+
+    # Employer ATS boards first: free, and every link is the company's own
+    # application form rather than an aggregator that may demand an account.
+    if config.ENABLE_ATS and config.ATS_BOARDS:
+        sources.append(ATSSource(config.ATS_BOARDS))
+
+    sources.append(
         JSearchSource(
             api_key=config.env("RAPIDAPI_KEY"),
             queries=config.QUERIES,
@@ -81,7 +89,7 @@ def build_sources(args) -> list:
             date_posted=args.date_posted or config.DATE_POSTED,
             job_requirements=config.JOB_REQUIREMENTS,
         )
-    ]
+    )
     return sources
 
 

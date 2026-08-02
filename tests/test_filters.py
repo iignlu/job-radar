@@ -224,6 +224,51 @@ check("malformed apply_options ignored, not fatal",
       == "https://z")
 
 
+# 14 — ATS sources: every link must be direct, and HTML must not reach filters
+from jobradar.sources.ats import ATSSource, PROVIDERS, _plain  # noqa: E402
+
+check("ATS costs no API quota", ATSSource([]).request_cost == 0)
+check("all confirmed providers have an adapter",
+      all(p in PROVIDERS for _c, p, _s in _config.ATS_BOARDS),
+      [p for _c, p, _s in _config.ATS_BOARDS if p not in PROVIDERS])
+
+check("HTML is stripped before filtering",
+      _plain("<p>Join our <b>graduate</b> team</p>") == "Join our graduate team",
+      _plain("<p>Join our <b>graduate</b> team</p>"))
+check("HTML entities are unescaped",
+      _plain("Python &amp; SQL") == "Python & SQL", _plain("Python &amp; SQL"))
+
+_ats = ATSSource([("Tamara", "greenhouse", "tamara")])
+_, _, _gh_map = PROVIDERS["greenhouse"]
+_gh = _ats._to_job("Tamara", "greenhouse", "tamara", _gh_map, {
+    "id": 4567, "title": "Graduate Software Engineer",
+    "absolute_url": "https://boards.greenhouse.io/tamara/jobs/4567",
+    "content": "<p>Join our <b>graduate</b> programme. Python and SQL.</p>",
+    "location": {"name": "Riyadh"}, "updated_at": "2026-08-01T10:00:00Z",
+})
+check("greenhouse posting maps to a Job", _gh.title == "Graduate Software Engineer", _gh.title)
+check("ATS link is marked direct", _gh.direct_url == _gh.url and _gh.best_url == _gh.url,
+      f"{_gh.direct_url} / {_gh.url}")
+check("ATS description reaches filters as plain text",
+      "graduate" in _gh.haystack and "<b>" not in _gh.haystack)
+check("ATS job passes the filters", evaluate(_gh).accepted, evaluate(_gh).reason)
+check("ATS key is namespaced by source", _gh.key.startswith("ats:greenhouse:"), _gh.key)
+
+# Nested location objects must not blow up or leak dicts into the message.
+_, _, _sr_map = PROVIDERS["smartrecruiters"]
+_sr = _ats._to_job("Almosafer", "smartrecruiters", "almosafer", _sr_map, {
+    "id": "abc", "name": "Junior Data Analyst",
+    "location": {"city": "Riyadh", "country": "sa", "remote": True},
+    "releasedDate": "2026-08-01T09:00:00Z",
+})
+check("smartrecruiters builds an apply URL",
+      _sr.url == "https://jobs.smartrecruiters.com/almosafer/abc", _sr.url)
+check("nested location is flattened", _sr.city == "Riyadh" and _sr.is_remote is True)
+
+check("a posting with no URL yields no fake apply route",
+      _ats._to_job("X", "greenhouse", "x", _gh_map, {"id": 1, "title": "T"}).apply_options == [])
+
+
 if __name__ == "__main__":
     passed = sum(1 for ok, _, _ in _results if ok)
     total = len(_results)

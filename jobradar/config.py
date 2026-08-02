@@ -64,6 +64,26 @@ JOB_REQUIREMENTS = ""
 # indistinguishable from a company with no open roles. Run tools/probe_ats.py
 # (or the probe-ats workflow) to find out which are real before wiring any of
 # these into build_sources().
+# CONFIRMED boards — verified live by tools/probe_ats.py, each returning real
+# postings. These are polled on every run. They cost nothing against the
+# JSearch quota, and every apply link is the employer's own form.
+#
+# Confirmed means "the board returned at least one job". Provider behaviour on
+# a bad slug varies too much to infer existence from an HTTP 200, and a board
+# with no jobs is unusable anyway.
+ATS_BOARDS = [
+    ("Lucidya", "workable", "lucidya"),
+    ("Tamara", "greenhouse", "tamara"),
+    ("Foodics", "workable", "foodics"),
+    ("Salla", "workable", "salla"),
+    ("Unifonic", "recruitee", "unifonic"),
+    ("Bupa Arabia", "workable", "bupa"),
+    ("Almosafer", "smartrecruiters", "almosafer"),
+    ("Lean Technologies", "ashby", "leantech"),
+]
+
+ENABLE_ATS = True
+
 ATS_COMPANIES = [
     # --- Saudi tech & startups: most likely to run Greenhouse/Lever/Ashby
     ("Tamara", "tamara"),
