@@ -58,8 +58,17 @@ PROVIDERS = {
 }
 
 
+# A slug no company could own. Providers that answer 200 for this are
+# permissive: they return a valid, empty board for any slug at all, so "the
+# request succeeded" tells you nothing. Without this control the first version
+# of this script reported all 50 companies as matches — an empty board and a
+# nonexistent one were indistinguishable, which is the same failure the probe
+# exists to prevent.
+CONTROL_SLUG = "zzz-no-such-company-9f3a1b"
+
+
 def probe(provider: str, slug: str):
-    """Return (provider, slug, job_count) when the board exists, else None."""
+    """Return (provider, slug, job_count) when the board answers, else None."""
     template, count_of = PROVIDERS[provider]
     url = template.format(slug=urllib.parse.quote(slug))
     request = urllib.request.Request(url, headers=UA)
@@ -77,9 +86,16 @@ def probe(provider: str, slug: str):
     except Exception:
         return None
 
-    # A board that exists but is empty is still a hit worth recording: the slug
-    # is right, the company just is not hiring today.
     return (provider, slug, count) if count is not None else None
+
+
+def find_permissive_providers() -> set:
+    """Which providers answer 200 for a slug that cannot exist."""
+    permissive = set()
+    for provider in PROVIDERS:
+        if probe(provider, CONTROL_SLUG) is not None:
+            permissive.add(provider)
+    return permissive
 
 
 def main(argv=None):
@@ -89,6 +105,12 @@ def main(argv=None):
     else:
         targets = ATS_COMPANIES
 
+    permissive = find_permissive_providers()
+    if permissive:
+        print(f"permissive providers (answer 200 for a nonexistent slug): "
+              f"{', '.join(sorted(permissive))}")
+        print("for these, only a board with at least one job counts as proof.\n")
+
     jobs = [(name, slug, provider)
             for name, slug in targets
             for provider in PROVIDERS]
@@ -96,33 +118,40 @@ def main(argv=None):
     print(f"probing {len(targets)} companies across {len(PROVIDERS)} providers "
           f"({len(jobs)} requests)\n")
 
-    hits = {}
+    confirmed, weak = {}, {}
     with ThreadPoolExecutor(max_workers=12) as pool:
         futures = {pool.submit(probe, p, slug): (name, slug)
                    for name, slug, p in jobs}
         for future in futures:
             result = future.result()
-            if result:
-                name, slug = futures[future]
-                hits.setdefault((name, slug), []).append(result)
+            if not result:
+                continue
+            provider, _slug, count = result
+            name, slug = futures[future]
+            # A strict provider 404s on a bad slug, so any answer proves the
+            # board. A permissive one proves nothing unless jobs came back.
+            target = confirmed if (count > 0 or provider not in permissive) else weak
+            target.setdefault((name, slug), []).append(result)
 
-    if not hits:
-        print("no boards matched. Either the slugs are wrong or these companies "
-              "do not use the probed providers.")
-    else:
+    if confirmed:
         print(f"{'COMPANY':<26} {'SLUG':<16} {'PROVIDER':<16} JOBS")
         print("-" * 68)
-        for (name, slug), found in sorted(hits.items()):
-            for provider, _s, count in sorted(found):
+        for (name, slug), found in sorted(confirmed.items()):
+            for provider, _s, count in sorted(found, key=lambda r: -r[2]):
                 print(f"{name:<26} {slug:<16} {provider:<16} {count}")
+    else:
+        print("no boards confirmed.")
 
-    missing = [n for n, s in targets if (n, s) not in hits]
-    print(f"\n{len(hits)} matched, {len(missing)} unmatched")
-    if missing:
-        print("unmatched: " + ", ".join(missing))
-        print("\nUnmatched means the candidate slug did not resolve — the company "
-              "may use a different slug, a provider not probed here (Workday, "
-              "Oracle, SuccessFactors, Taleo), or its own careers system.")
+    total = sum(c for found in confirmed.values() for _p, _s, c in found)
+    print(f"\nCONFIRMED: {len(confirmed)} companies, {total} open jobs")
+
+    unconfirmed = [n for n, s in targets if (n, s) not in confirmed]
+    if unconfirmed:
+        print(f"\nUNCONFIRMED ({len(unconfirmed)}): " + ", ".join(unconfirmed))
+        print("A slug that does not resolve, or resolves only on a permissive "
+              "provider with zero jobs, is not usable — the company may use a "
+              "different slug, a provider not probed here (Workday, Oracle, "
+              "SuccessFactors, Taleo), or its own careers system.")
     return 0
 
 
