@@ -19,6 +19,7 @@ the structure of a real alert before tuning.
 """
 
 import email
+import html as _html
 import imaplib
 import re
 from email.header import decode_header, make_header
@@ -33,6 +34,12 @@ _log = log.get(__name__)
 _JOB_LINK_RE = re.compile(r"https?://[^\s\"'<>]*?/jobs/view/(\d+)[^\s\"'<>]*")
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"[ \t\xa0]+")
+
+# Anchor text that is chrome, not a job title.
+_NON_TITLES = {
+    "see job", "view job", "apply", "apply now", "see all jobs", "view all",
+    "unsubscribe", "see more jobs", "view job posting",
+}
 
 
 def _clean(text: str) -> str:
@@ -122,24 +129,38 @@ class LinkedInEmailSource(Source):
     # ---------------------------------------------------------------- parse
 
     def _postings(self, body: str):
-        """Extract (job_id, url, title) triples from one alert body.
+        """Extract {job_id: (url, title)} from one alert body.
 
         Anchored on the job link rather than on layout: the URL shape has been
         stable for years, while the surrounding table markup is regenerated
-        constantly. Title comes from the anchor text when there is one.
-        """
-        seen = {}
-        for match in _JOB_LINK_RE.finditer(body):
-            job_id, url = match.group(1), match.group(0)
-            if job_id in seen:
-                continue
+        constantly.
 
-            # Anchor text immediately after this link, if the markup has one.
-            tail = body[match.end(): match.end() + 600]
-            anchor = re.search(r">\s*([^<>]{4,120}?)\s*<", tail)
-            title = _clean(_TAG_RE.sub(" ", anchor.group(1))) if anchor else ""
-            seen[job_id] = (url.replace("&amp;", "&"), title)
-        return seen
+        Each job appears TWICE in an alert — once wrapping the company logo in
+        a 48px cell, once wrapping the title text. Keeping the first occurrence
+        per id therefore kept the logo link, whose anchor holds an <img> and no
+        text, and every posting came out untitled. So every occurrence is read
+        and the best title among them wins.
+        """
+        found = {}
+        for match in _JOB_LINK_RE.finditer(body):
+            job_id = match.group(1)
+            url = _html.unescape(match.group(0))
+
+            # Anchor body: from the end of the opening <a ...> tag to </a>.
+            # Nested markup is stripped, so a logo anchor reduces to "".
+            open_tag_end = body.find(">", match.end())
+            if open_tag_end == -1:
+                continue
+            close = body.find("</a>", open_tag_end)
+            inner = body[open_tag_end + 1: close] if close != -1 else ""
+            title = _clean(_html.unescape(_TAG_RE.sub(" ", inner)))
+
+            if title.lower() in _NON_TITLES or len(title) > 160:
+                title = ""
+
+            previous_url, previous_title = found.get(job_id, ("", ""))
+            found[job_id] = (previous_url or url, title or previous_title)
+        return found
 
     def fetch(self) -> list[Job]:
         jobs, total = [], 0
@@ -171,13 +192,11 @@ class LinkedInEmailSource(Source):
                     _log.info("    RAW CONTEXT: %s", condensed[:1200])
 
             for job_id, (url, title) in postings.items():
-                if not title:
-                    # A link we cannot title is not worth alerting on: the
-                    # filters run on the title, so it would be rejected anyway
-                    # and only add noise to the reject log.
-                    continue
                 jobs.append(Job(
-                    title=title,
+                    # Untitled postings are still sent: this source is not
+                    # title-filtered, so a missing title costs presentation,
+                    # not correctness. The id at least makes the link openable.
+                    title=title or f"LinkedIn job {job_id}",
                     company=_clean(subject.split(" - ")[-1]) or "via LinkedIn alert",
                     url=url,
                     source=self.name,

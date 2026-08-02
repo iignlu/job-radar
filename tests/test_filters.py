@@ -341,27 +341,36 @@ from jobradar.sources.linkedin_email import LinkedInEmailSource  # noqa: E402
 
 _li = LinkedInEmailSource("h", "u", "p")
 
-# Shape of a real alert: tracking-laden links, title as the anchor text.
+# Real structure, captured from a live alert: each job appears TWICE — first
+# wrapping the company logo in a 48px cell (an <img>, no text), then wrapping
+# the title. Keeping the first occurrence per id yielded untitled postings.
 _MAIL = """
-<table><tr><td>
-<a href="https://www.linkedin.com/comm/jobs/view/4123456789/?trk=eml-x&amp;lipi=abc">
-  Graduate Software Engineer</a><br/>Tamara - Riyadh
-</td></tr><tr><td>
-<a href="https://www.linkedin.com/comm/jobs/view/4987654321/?trk=eml-y">
-  Junior Data Analyst</a><br/>stc - Riyadh
-</td></tr></table>
+<td class="pr-2 w-6" width="48">
+<a href="https://www.linkedin.com/comm/jobs/view/4444591579?alertAction=markasviewed&amp;trk=eml-x">
+<img src="https://media.licdn.com/logo.png" width="48"/></a></td>
+<td><a href="https://www.linkedin.com/comm/jobs/view/4444591579?alertAction=markasviewed&amp;trk=eml-y">
+<strong>Graduate Software Engineer</strong></a><br/>Tamara &middot; Riyadh</td>
+<td class="pr-2 w-6" width="48">
+<a href="https://www.linkedin.com/comm/jobs/view/4445838382?trk=eml-z"><img src="l.png"/></a></td>
+<td><a href="https://www.linkedin.com/comm/jobs/view/4445838382?trk=eml-w">Junior Data Analyst</a></td>
 """
 _found = _li._postings(_MAIL)
-check("extracts every job link", len(_found) == 2, list(_found))
-check("job id is the stable part of the URL", "4123456789" in _found, list(_found))
+check("extracts every distinct job", len(_found) == 2, list(_found))
+check("logo link does not win over the title link",
+      _found["4444591579"][1] == "Graduate Software Engineer", _found["4444591579"])
+check("nested markup is stripped from the title",
+      "<strong>" not in _found["4444591579"][1])
+check("second job titled too",
+      _found["4445838382"][1] == "Junior Data Analyst", _found["4445838382"])
 check("HTML entities in the URL are decoded",
-      "&amp;" not in _found["4123456789"][0], _found["4123456789"][0])
-
-_dupe = _li._postings(_MAIL + _MAIL)
-check("the same job repeated in one mail is counted once", len(_dupe) == 2)
-
+      "&amp;" not in _found["4444591579"][0], _found["4444591579"][0])
 check("a mail with no job links yields nothing, without raising",
       _li._postings("<p>Your job alert is ready</p>") == {})
+
+# LinkedIn alerts skip our filters: the saved search already did that job.
+check("linkedin-email is declared pre-filtered",
+      "linkedin-email" in _config.PRE_FILTERED_SOURCES)
+
 check("linkedin-email costs no API quota", _li.request_cost == 0)
 
 # Not configured -> source is simply absent, rather than a crash at build time.

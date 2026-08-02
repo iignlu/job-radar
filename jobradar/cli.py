@@ -8,7 +8,7 @@ and the overflow deferral.
 import argparse
 
 from . import config, log
-from .filters import evaluate
+from .filters import Verdict, evaluate
 from .notify import ChatIdUnavailable, Telegram, describe_bot, resolve_chat_id
 from .sources.ats import ATSSource
 from .sources.demo import DemoSource
@@ -290,7 +290,13 @@ def main(argv=None) -> int:
 
     matches, rejected = [], []
     for job in fresh:
-        verdict = evaluate(job)
+        if job.source in config.PRE_FILTERED_SOURCES:
+            # Already filtered upstream by a search you tuned yourself; our
+            # keyword layers would only throw away what it decided was
+            # relevant, and this source carries no description to read.
+            verdict = Verdict(True, "from your LinkedIn job alert")
+        else:
+            verdict = evaluate(job)
         (matches if verdict.accepted else rejected).append((job, verdict))
 
     if args.show_rejected:

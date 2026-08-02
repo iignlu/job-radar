@@ -103,6 +103,15 @@ LINKEDIN_ALERT_SENDER = "jobalerts-noreply@linkedin.com"
 # How far back to read. Alerts repeat roles, and dedup handles the overlap.
 LINKEDIN_ALERT_DAYS = 7
 
+# Sources whose postings skip the filter layers entirely.
+#
+# A LinkedIn alert is the result of a saved search you already tuned — role,
+# location, experience level. Running our own keyword filters over it would
+# only discard things LinkedIn already decided were relevant, and the alert
+# mail carries no description for the layers to read anyway. Dedup and the
+# per-run cap still apply, so these cannot spam.
+PRE_FILTERED_SOURCES = ["linkedin-email"]
+
 ATS_COMPANIES = [
     # --- Saudi tech & startups: most likely to run Greenhouse/Lever/Ashby
     ("Tamara", "tamara"),
