@@ -158,27 +158,75 @@ ATS_COMPANIES = [
 # fires on "internal" and "international". That is a deliberate trade under
 # the same reasoning as the years parser below — a false accept costs you three
 # seconds of reading, a false reject costs you a job you never saw.
-MUST_MATCH = [
-    # seniority / early-career
+# WHAT THE JOB IS. Matched against the TITLE only, and required — a posting
+# with no role term in its title is not in this field, whatever its description
+# says.
+#
+# Title-only is the important part. Descriptions carry company boilerplate: on
+# an employer's ATS board every posting mentions the graduate programme and
+# half of them list Python somewhere, so description matching accepted Customer
+# Care Advisor, Sales Executive and Fraud Investigator. A title does not lie
+# about what the job is.
+MUST_MATCH_ROLE = [
+    # software
+    "software engineer", "software developer", "software development",
+    "web developer", "full stack", "fullstack", "frontend", "front-end",
+    "backend", "back-end", "mobile developer", "ios developer",
+    "android developer", "developer", "programmer",
+    # "engineer" is never listed bare: it matched "Entry-Level Engineer:
+    # Hands-On Site & Design", a civil role. Every accepted use is qualified by
+    # something that identifies the discipline.
+    "graduate engineer", "trainee engineer", "development engineer",
+    "development program engineer", "platform engineer", "solutions engineer",
+    # data
+    "data analyst", "data engineer", "data scientist", "data science",
+    "database administrator", "business intelligence", "bi developer",
+    "power bi", "analytics engineer", "machine learning", "ml engineer",
+    "artificial intelligence", "ai engineer",
+    # platform / quality / security
+    "devops", "sre", "cloud engineer", "qa engineer", "quality assurance",
+    "test engineer", "automation engineer", "cybersecurity",
+    "security engineer", "systems engineer", "network engineer",
+    # named technologies, which only appear in a title on a technical role
+    "python", "java", "javascript", "typescript", "react", "laravel", ".net",
+    "sql",
+    # Arabic
+    "مطور", "مبرمج", "مهندس برمجيات", "محلل بيانات", "مهندس بيانات",
+    "تقنية المعلومات", "أمن سيبراني", "ذكاء اصطناعي", "علوم البيانات",
+]
+
+# WHO THE JOB IS FOR. Enrichment only — these explain why something matched but
+# can no longer qualify a posting on their own.
+#
+# تمهير in particular: the Tamheer programme runs across every major, so on its
+# own it matches marketing, HR and finance placements just as readily as
+# technical ones. Same for graduate, junior and associate. Pairing them with a
+# role term is what keeps "Database Administrator - Tamheer Program" and drops
+# "Marketing Specialist (Tamheer)".
+MUST_MATCH_LEVEL = [
     "graduate", "fresh grad", "junior", "entry level", "entry-level",
     "trainee", "intern", "co-op", "associate", "rotational",
     "تمهير", "حديث التخرج", "خريج", "متدرب",
-    # stack / discipline
-    "software engineer", "software developer", "full stack", "fullstack",
-    "frontend", "front-end", "backend", "back-end", "web developer",
-    "data analyst", "data engineer", "business intelligence",
-    "bi developer", "power bi", "react", "laravel", "python", "sql",
-    "javascript", "typescript",
-    "مطور", "مهندس برمجيات", "محلل بيانات",
 ]
+
+# Kept as the union so anything reading MUST_MATCH still sees every term.
+MUST_MATCH = MUST_MATCH_ROLE + MUST_MATCH_LEVEL
 
 # Checked against the TITLE only. This is the layer that actually removes
 # senior roles — a job description will happily mention "senior stakeholders"
 # or "reports to the lead", but a title does not lie about its own level.
 EXCLUDE_TITLE = [
+    # too senior
     "senior", "sr.", "lead", "principal", "staff engineer", "manager",
     "head of", "director", "architect", "chief", "vp", "expert",
     "أول", "رئيس", "مدير", "خبير",
+    # "engineer" is in MUST_MATCH_ROLE so that Systems Engineer and Graduate
+    # Development Program Engineer pass; these keep the other engineering
+    # disciplines out. Seen live: "Entry-Level Engineer: Hands-On Site &
+    # Design" was a civil role that matched on seniority alone.
+    "site engineer", "civil", "mechanical", "electrical", "chemical",
+    "structural", "piping", "hse", "sales engineer", "field engineer",
+    "process engineer", "maintenance engineer", "petroleum",
 ]
 
 # Checked against the description. Catches the postings that pass the title

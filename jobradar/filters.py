@@ -80,13 +80,23 @@ def evaluate(job) -> Verdict:
         if term in body:
             return Verdict(False, f"description demands '{term}'")
 
-    # Layer 3 — must-match. Nothing relevant in title or description means this
-    # is not our field at all.
-    haystack = job.haystack
-    hits = [term for term in config.MUST_MATCH if term in haystack]
-    if not hits:
-        return Verdict(False, "no early-career or stack keyword matched")
-    reason = ", ".join(hits[:4])
+    # Layer 3 — is this the right field, and who is it for?
+    #
+    # The role term must be in the TITLE. Descriptions are unreliable: on an
+    # employer's ATS board every posting repeats the company's graduate-scheme
+    # boilerplate and many list a technology in passing, so matching them let
+    # through Customer Care Advisor, Sales Executive and Fraud Investigator.
+    #
+    # Level terms are enrichment only. تمهير, graduate, junior and associate
+    # all span every major — on their own they match a marketing placement as
+    # readily as an engineering one, so they can explain a match but never
+    # cause it.
+    role_hits = [term for term in config.MUST_MATCH_ROLE if term in title]
+    if not role_hits:
+        return Verdict(False, "no software or data role in the title")
+
+    level_hits = [term for term in config.MUST_MATCH_LEVEL if term in job.haystack]
+    reason = ", ".join((role_hits + level_hits)[:4])
 
     # Layer 4 — parsed experience requirement. Costs a regex sweep, so it runs
     # after the cheap string checks have already thinned the field.

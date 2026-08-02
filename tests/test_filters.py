@@ -88,9 +88,37 @@ verdict = evaluate(job(
 ))
 check(
     "rejects unrelated field (marketing)",
-    not verdict.accepted and "keyword" in verdict.reason,
+    not verdict.accepted and "role in the title" in verdict.reason,
     verdict.reason,
 )
+
+# 7b — the real corpus. Every title below came from a live ATS run. Employer
+# boards repeat company boilerplate on every posting, so a description-based
+# match accepted Sales Executive and Customer Care Advisor; these lock in that
+# the role must come from the title while تمهير/graduate only enrich it.
+_BOILERPLATE = ("Join our graduate programme. We hire fresh grads and interns. "
+                "Our stack includes Python and SQL. Associate level, rotational.")
+_CORPUS = [
+    ("Database Administrator - Tamheer Program", True),
+    ("Graduate Development Program Engineer", True),
+    ("Junior Data Engineer: Build Scalable Data Pipelines", True),
+    ("Systems Engineer | KSA", True),
+    ("Full Stack Engineer (Fresh Graduate - Saudi)", True),
+    # تمهير runs across every major, so it must not qualify a posting alone.
+    ("Marketing Specialist ( Tamheer ) x 3", False),
+    ("E-Commerce Talent Curator ( Tamheer program )", False),
+    ("Financial Planning & Analysis Junior (Tamheer Program)", False),
+    ("Sales Executive", False),
+    ("Customer Care Advisor (Voice)", False),
+    ("Fraud Investigator", False),
+    ("Compliance Associate - Builders Program", False),
+    ("Junior eDiscovery Project Coordinator | Data-Driven Tech", False),
+    ("Entry-Level Engineer: Hands-On Site & Design", False),
+]
+for _title, _want in _CORPUS:
+    _v = evaluate(job(_title, _BOILERPLATE))
+    check(f"corpus: {'keep' if _want else 'drop'} {_title[:44]}",
+          _v.accepted == _want, _v.reason)
 
 # 8 — year-parsing table
 YEAR_CASES = [
