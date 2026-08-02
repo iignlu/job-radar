@@ -8,6 +8,7 @@ Telegram reject the whole send with a 400.
 
 import html
 import time
+import urllib.parse
 from datetime import datetime, timezone
 
 from . import config, http, log
@@ -118,6 +119,41 @@ def with_signature(body: str) -> str:
     return body[: MAX_BODY - len(footer)] + footer
 
 
+# Tracking parameters that make a link unshareably long without changing where
+# it goes. LinkedIn alert URLs are ~600 characters of these; stripped, the same
+# job is a 45-character link.
+_TRACKING_PARAMS = {
+    "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+    "trk", "trackingid", "refid", "lipi", "miditoken", "midtoken", "midsig",
+    "ebp", "originalsubdomain", "position", "pagenum", "alertaction",
+    "savedsearchid", "savedsearchauthtoken", "eid", "src", "source",
+    "gh_src", "ref",
+}
+
+
+def shareable_url(url: str) -> str:
+    """Strip tracking parameters so the link survives being pasted elsewhere.
+
+    Exists because these alerts get forwarded to friends on WhatsApp. A 600
+    character URL wraps badly, and some clients truncate it into a dead link.
+    """
+    if not url:
+        return ""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        kept = [
+            (key, value)
+            for key, value in urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+            if key.lower() not in _TRACKING_PARAMS
+        ]
+        return urllib.parse.urlunsplit(
+            (parts.scheme, parts.netloc, parts.path,
+             urllib.parse.urlencode(kept), "")
+        )
+    except Exception:
+        return url
+
+
 def _apply_lines(job, esc) -> list:
     """The apply row(s): lead with the employer's own link when there is one.
 
@@ -127,15 +163,21 @@ def _apply_lines(job, esc) -> list:
     primary = job.best_url if config.PREFER_DIRECT_APPLY else job.url
     if not primary:
         return []
+    primary = shareable_url(primary)
 
-    is_direct = bool(job.direct_url) and primary == job.direct_url
-    label = "Apply on company site →" if is_direct else "Apply →"
-    lines = [f'<a href="{esc(primary, quote=True)}">{label}</a>']
+    is_direct = bool(job.direct_url) and primary == shareable_url(job.direct_url)
+    label = "Apply on company site" if is_direct else "Apply"
+
+    # The URL goes in as PLAIN TEXT, not an anchor. Telegram auto-links it, so
+    # it stays tappable — but an anchor hides the address, and copying one to
+    # forward the job to someone gives them the words "Apply →" and no link.
+    # These alerts get shared, so the address has to be in the text.
+    lines = [f"🔗 {label}:", esc(primary)]
 
     limit = config.MAX_ALTERNATE_APPLY_LINKS
     if limit:
         alternates = [
-            f'<a href="{esc(o["url"], quote=True)}">{esc(o["publisher"] or "link")}</a>'
+            f'<a href="{esc(shareable_url(o["url"]), quote=True)}">{esc(o["publisher"] or "link")}</a>'
             for o in job.alternate_options[:limit]
         ]
         if alternates:
