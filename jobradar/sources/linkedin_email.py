@@ -161,6 +161,15 @@ class LinkedInEmailSource(Source):
                 for job_id, (url, title) in list(postings.items())[:5]:
                     _log.info("    %s | %s", job_id, title[:70] or "(no title found)")
 
+                # Print the raw markup around the first link. Guessing at the
+                # layout is what produced "(no title found)" — this shows what
+                # is actually there so the parser is written against evidence.
+                first = _JOB_LINK_RE.search(body)
+                if first and not any(t for _u, t in postings.values()):
+                    window = body[max(0, first.start() - 400): first.end() + 900]
+                    condensed = _WS_RE.sub(" ", window.replace("\n", " "))
+                    _log.info("    RAW CONTEXT: %s", condensed[:1200])
+
             for job_id, (url, title) in postings.items():
                 if not title:
                     # A link we cannot title is not worth alerting on: the
