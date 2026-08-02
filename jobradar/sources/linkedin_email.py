@@ -53,6 +53,18 @@ def _clean(text: str) -> str:
     return _WS_RE.sub(" ", text or "").strip()
 
 
+def _sent_at(raw) -> str | None:
+    """RFC 2822 Date header -> ISO 8601, or None if unparseable."""
+    if not raw:
+        return None
+    try:
+        from email.utils import parsedate_to_datetime
+
+        return parsedate_to_datetime(raw).isoformat()
+    except Exception:
+        return None
+
+
 def _decode(value) -> str:
     try:
         return str(make_header(decode_header(value or "")))
@@ -108,7 +120,9 @@ class LinkedInEmailSource(Source):
                 if status != "OK" or not payload or not payload[0]:
                     continue
                 message = email.message_from_bytes(payload[0][1])
-                yield _decode(message.get("Subject")), self._body(message)
+                yield (_decode(message.get("Subject")),
+                       _sent_at(message.get("Date")),
+                       self._body(message))
         finally:
             try:
                 connection.logout()
@@ -206,7 +220,7 @@ class LinkedInEmailSource(Source):
             _log.error("could not read mailbox: %s", exc)
             return []
 
-        for subject, body in messages:
+        for subject, sent_at, body in messages:
             postings = self._postings(body)
             total += len(postings)
 
@@ -246,6 +260,12 @@ class LinkedInEmailSource(Source):
                     city=card["location"] or None,
                     country="Saudi Arabia",
                     publisher=publisher,
+                    # An alert card carries no posting date, so the mail's own
+                    # timestamp stands in: LinkedIn sends these when a job is
+                    # newly matched, so it dates when the role surfaced. Without
+                    # it every LinkedIn job would be ageless and the freshness
+                    # layer could never drop one.
+                    posted_at=sent_at,
                     native_id=job_id,
                     apply_options=[{"publisher": publisher, "url": url,
                                     "is_direct": False}],

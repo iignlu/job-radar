@@ -410,6 +410,51 @@ finally:
     if _saved[1]: _os.environ["IMAP_PASSWORD"] = _saved[1]
 
 
+# 17 — working arrangement: on-site, full-time
+_ONSITE = "Graduate role in Riyadh. Python and SQL."
+
+check("remote flag is rejected",
+      not evaluate(job("Data Analyst", _ONSITE, is_remote=True)).accepted)
+_r = evaluate(job("Data Analyst - Remote", _ONSITE))
+check("'remote' in the title is rejected", not _r.accepted and "remote" in _r.reason, _r.reason)
+_h = evaluate(job("Software Engineer (Hybrid)", _ONSITE))
+check("'hybrid' in the title is rejected", not _h.accepted and "hybrid" in _h.reason, _h.reason)
+check("Arabic remote marker is rejected",
+      not evaluate(job("مطور برمجيات عن بعد", "فريق التطوير")).accepted)
+check("an on-site role still passes", evaluate(job("Data Analyst", _ONSITE)).accepted)
+
+check("part-time is rejected",
+      not evaluate(job("Data Analyst", _ONSITE, employment_type="PARTTIME")).accepted)
+check("contract is rejected",
+      not evaluate(job("Data Analyst", _ONSITE, employment_type="CONTRACTOR")).accepted)
+check("full-time passes",
+      evaluate(job("Data Analyst", _ONSITE, employment_type="FULLTIME")).accepted)
+check("FULL_TIME spelling passes",
+      evaluate(job("Data Analyst", _ONSITE, employment_type="Full-time")).accepted)
+# تمهير and graduate schemes are routinely tagged INTERN despite full-time
+# hours; rejecting those would drop the roles this bot exists to find.
+check("INTERN passes, so Tamheer is not lost",
+      evaluate(job("Database Administrator - Tamheer Program", _ONSITE,
+                   employment_type="INTERN")).accepted)
+check("an unstated employment type is not assumed part-time",
+      evaluate(job("Data Analyst", _ONSITE)).accepted)
+
+# 18 — trust_source skips ONLY the keyword layer
+# No excluded term and no role keyword — isolates the keyword layer.
+_li_job = job("Business Operations Specialist", "", source="linkedin-email")
+check("trusted source skips the role-keyword layer",
+      evaluate(_li_job, trust_source=True).accepted)
+check("untrusted source still needs a role keyword",
+      not evaluate(_li_job).accepted)
+_li_remote = job("Business Operations Specialist - Remote", "", source="linkedin-email")
+check("trusted source is STILL rejected when remote",
+      not evaluate(_li_remote, trust_source=True).accepted,
+      evaluate(_li_remote, trust_source=True).reason)
+_li_senior = job("Senior Business Operations Specialist", "", source="linkedin-email")
+check("trusted source is STILL rejected when senior",
+      not evaluate(_li_senior, trust_source=True).accepted)
+
+
 if __name__ == "__main__":
     passed = sum(1 for ok, _, _ in _results if ok)
     total = len(_results)

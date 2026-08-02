@@ -282,6 +282,33 @@ MAX_YEARS_EXPERIENCE = 3
 # asymmetry as the years parser: a false rejection costs an opportunity.
 MAX_AGE_DAYS = 14
 
+# --------------------------------------------------------------------------
+# Working arrangement
+# --------------------------------------------------------------------------
+
+# On-site only: drop anything flagged remote, or whose title says remote or
+# hybrid. Only the title is scanned, not the description — a description
+# saying "this role is not remote" would otherwise reject itself.
+EXCLUDE_REMOTE = True
+
+REMOTE_MARKERS = [
+    "remote", "work from home", "wfh", "hybrid", "telecommute",
+    "عن بعد", "عن بُعد", "هجين", "هجينة",
+]
+
+# Full-time only. Applied ONLY when the source states a type — most ATS
+# boards omit it, and rejecting on silence would discard most of the board.
+REQUIRE_FULL_TIME = True
+
+# INTERN and TRAINEE are deliberately allowed: تمهير and graduate programmes
+# are routinely tagged that way despite being full-time hours, and excluding
+# them would drop exactly the roles this bot exists to find. Remove them from
+# this set if you want strictly permanent positions.
+FULL_TIME_TYPES = {
+    "FULLTIME", "FULL_TIME", "FULL-TIME", "FULL TIME", "PERMANENT",
+    "INTERN", "INTERNSHIP", "TRAINEE", "APPRENTICESHIP",
+}
+
 # Empty list means "anywhere in COUNTRY". Add e.g. ["riyadh", "jeddah"] to
 # narrow. Matched case-insensitively against city, falling back to country.
 CITIES: list[str] = []

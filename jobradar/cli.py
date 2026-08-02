@@ -290,13 +290,11 @@ def main(argv=None) -> int:
 
     matches, rejected = [], []
     for job in fresh:
-        if job.source in config.PRE_FILTERED_SOURCES:
-            # Already filtered upstream by a search you tuned yourself; our
-            # keyword layers would only throw away what it decided was
-            # relevant, and this source carries no description to read.
-            verdict = Verdict(True, "from your LinkedIn job alert")
-        else:
-            verdict = evaluate(job)
+        # A pre-filtered source skips only the keyword layer — the upstream
+        # search already chose the field. Seniority, freshness and the
+        # on-site/full-time rules still apply: those are your requirements,
+        # and no upstream knows them.
+        verdict = evaluate(job, trust_source=job.source in config.PRE_FILTERED_SOURCES)
         (matches if verdict.accepted else rejected).append((job, verdict))
 
     if args.show_rejected:

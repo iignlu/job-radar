@@ -1,4 +1,4 @@
-"""The six filter layers.
+"""The filter layers.
 
 Ordered cheapest-first: a string scan of the title costs nothing, a regex sweep
 of a 4000-character description costs more, so the layers that reject the most
@@ -62,8 +62,14 @@ def min_years_required(text: str) -> int:
     return min(found) if found else 0
 
 
-def evaluate(job) -> Verdict:
-    """Run the six layers against a Job."""
+def evaluate(job, trust_source: bool = False) -> Verdict:
+    """Run the filter layers against a Job.
+
+    `trust_source` skips only the keyword layer, for sources that already
+    filtered by role upstream — a LinkedIn saved search, say. It does NOT skip
+    seniority, freshness or working-arrangement checks: those express what you
+    will accept, and no upstream knows them.
+    """
 
     # Layer 1 — title exclusions. The single highest-yield check: this is what
     # removes senior roles, and a title is the one field that reliably states
@@ -83,14 +89,29 @@ def evaluate(job) -> Verdict:
                 False, f"posted {int(age)} days ago (max {config.MAX_AGE_DAYS})"
             )
 
-    # Layer 3 — body exclusions. Explicit multi-year demands that survived the
+    # Layer 3 — working arrangement. On-site, full-time.
+    if config.EXCLUDE_REMOTE:
+        if job.is_remote:
+            return Verdict(False, "remote role")
+        marker = next((m for m in config.REMOTE_MARKERS if m in title), None)
+        if marker:
+            return Verdict(False, f"title says '{marker}'")
+
+    if config.REQUIRE_FULL_TIME and job.employment_type:
+        # Only when the source actually states a type. Most ATS boards omit
+        # it, and rejecting on silence would throw away most of the board.
+        stated = str(job.employment_type).strip().upper().replace("-", "_")
+        if stated not in {t.upper().replace("-", "_") for t in config.FULL_TIME_TYPES}:
+            return Verdict(False, f"employment type is {job.employment_type}")
+
+    # Layer 4 — body exclusions. Explicit multi-year demands that survived the
     # title check.
     body = (job.description or "").lower()
     for term in config.EXCLUDE_BODY:
         if term in body:
             return Verdict(False, f"description demands '{term}'")
 
-    # Layer 4 — is this the right field, and who is it for?
+    # Layer 5 — is this the right field, and who is it for?
     #
     # The role term must be in the TITLE. Descriptions are unreliable: on an
     # employer's ATS board every posting repeats the company's graduate-scheme
@@ -102,19 +123,24 @@ def evaluate(job) -> Verdict:
     # readily as an engineering one, so they can explain a match but never
     # cause it.
     role_hits = [term for term in config.MUST_MATCH_ROLE if term in title]
-    if not role_hits:
-        return Verdict(False, "no software or data role in the title")
-
     level_hits = [term for term in config.MUST_MATCH_LEVEL if term in job.haystack]
-    reason = ", ".join((role_hits + level_hits)[:4])
 
-    # Layer 5 — parsed experience requirement. Costs a regex sweep, so it runs
+    if trust_source:
+        # The upstream search already picked the field. Report whatever terms
+        # happen to match so the alert still explains itself.
+        reason = ", ".join((role_hits + level_hits)[:4]) or "from a filtered source"
+    else:
+        if not role_hits:
+            return Verdict(False, "no software or data role in the title")
+        reason = ", ".join((role_hits + level_hits)[:4])
+
+    # Layer 6 — parsed experience requirement. Costs a regex sweep, so it runs
     # after the cheap string checks have already thinned the field.
     years = min_years_required(job.description or "")
     if years > config.MAX_YEARS_EXPERIENCE:
         return Verdict(False, f"requires {years} years experience (max {config.MAX_YEARS_EXPERIENCE})")
 
-    # Layer 6 — geography. Skipped entirely when CITIES is empty, which is the
+    # Layer 7 — geography. Skipped entirely when CITIES is empty, which is the
     # default: COUNTRY already scoped the search.
     if config.CITIES:
         location = (job.location or "").lower()
