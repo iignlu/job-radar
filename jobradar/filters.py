@@ -1,4 +1,4 @@
-"""The five filter layers.
+"""The six filter layers.
 
 Ordered cheapest-first: a string scan of the title costs nothing, a regex sweep
 of a 4000-character description costs more, so the layers that reject the most
@@ -63,7 +63,7 @@ def min_years_required(text: str) -> int:
 
 
 def evaluate(job) -> Verdict:
-    """Run the five layers against a Job."""
+    """Run the six layers against a Job."""
 
     # Layer 1 — title exclusions. The single highest-yield check: this is what
     # removes senior roles, and a title is the one field that reliably states
@@ -73,14 +73,24 @@ def evaluate(job) -> Verdict:
         if term in title:
             return Verdict(False, f"title contains excluded term '{term}'")
 
-    # Layer 2 — body exclusions. Explicit multi-year demands that survived the
+    # Layer 2 — freshness. Costs one date parse, so it runs before any
+    # description scanning. An unknown date passes: absence of a timestamp is
+    # not evidence of staleness.
+    if config.MAX_AGE_DAYS:
+        age = job.age_days
+        if age is not None and age > config.MAX_AGE_DAYS:
+            return Verdict(
+                False, f"posted {int(age)} days ago (max {config.MAX_AGE_DAYS})"
+            )
+
+    # Layer 3 — body exclusions. Explicit multi-year demands that survived the
     # title check.
     body = (job.description or "").lower()
     for term in config.EXCLUDE_BODY:
         if term in body:
             return Verdict(False, f"description demands '{term}'")
 
-    # Layer 3 — is this the right field, and who is it for?
+    # Layer 4 — is this the right field, and who is it for?
     #
     # The role term must be in the TITLE. Descriptions are unreliable: on an
     # employer's ATS board every posting repeats the company's graduate-scheme
@@ -98,13 +108,13 @@ def evaluate(job) -> Verdict:
     level_hits = [term for term in config.MUST_MATCH_LEVEL if term in job.haystack]
     reason = ", ".join((role_hits + level_hits)[:4])
 
-    # Layer 4 — parsed experience requirement. Costs a regex sweep, so it runs
+    # Layer 5 — parsed experience requirement. Costs a regex sweep, so it runs
     # after the cheap string checks have already thinned the field.
     years = min_years_required(job.description or "")
     if years > config.MAX_YEARS_EXPERIENCE:
         return Verdict(False, f"requires {years} years experience (max {config.MAX_YEARS_EXPERIENCE})")
 
-    # Layer 5 — geography. Skipped entirely when CITIES is empty, which is the
+    # Layer 6 — geography. Skipped entirely when CITIES is empty, which is the
     # default: COUNTRY already scoped the search.
     if config.CITIES:
         location = (job.location or "").lower()

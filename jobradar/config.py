@@ -239,6 +239,21 @@ EXCLUDE_BODY = [
 # Anything demanding strictly more than this many years is dropped.
 MAX_YEARS_EXPERIENCE = 3
 
+# Drop postings older than this many days. 0 disables the check.
+#
+# 14 rather than 7, deliberately. This barely touches the JSearch side, where
+# DATE_POSTED already limits results to the last day — it exists for the ATS
+# boards, which list every open role regardless of age. And there, age means
+# much less: a role still on a company's own board has not been closed by
+# anyone, so a ten-day-old Tamheer posting is as live as a one-day-old one.
+# Seven days would also punish the Saudi week, where a Thursday posting sits
+# through Friday and Saturday before you could realistically apply.
+#
+# Postings with no date at all are kept. An unknown date is not evidence of
+# staleness, and rejecting on it would silently drop good roles — the same
+# asymmetry as the years parser: a false rejection costs an opportunity.
+MAX_AGE_DAYS = 14
+
 # Empty list means "anywhere in COUNTRY". Add e.g. ["riyadh", "jeddah"] to
 # narrow. Matched case-insensitively against city, falling back to country.
 CITIES: list[str] = []

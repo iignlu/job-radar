@@ -297,6 +297,45 @@ check("a posting with no URL yields no fake apply route",
       _ats._to_job("X", "greenhouse", "x", _gh_map, {"id": 1, "title": "T"}).apply_options == [])
 
 
+# 15 — freshness (layer 2)
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+
+def _ago(days):
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+
+_FRESH_DESC = "Graduate role. Python and SQL."
+check("age_days is None without a timestamp",
+      job("Data Analyst", _FRESH_DESC).age_days is None)
+check("age_days reads an ISO timestamp",
+      abs(job("Data Analyst", _FRESH_DESC, posted_at=_ago(5)).age_days - 5) < 0.01)
+check("age_days handles a Z suffix",
+      job("Data Analyst", _FRESH_DESC, posted_at="2026-08-01T00:00:00Z").age_days is not None)
+check("a future-dated posting is treated as brand new",
+      job("Data Analyst", _FRESH_DESC, posted_at=_ago(-2)).age_days == 0.0)
+check("an unparseable date does not crash",
+      job("Data Analyst", _FRESH_DESC, posted_at="last Tuesday").age_days is None)
+
+check("a 3-day-old posting is kept",
+      evaluate(job("Data Analyst", _FRESH_DESC, posted_at=_ago(3))).accepted)
+check("a 13-day-old posting is kept (inside the 14-day window)",
+      evaluate(job("Data Analyst", _FRESH_DESC, posted_at=_ago(13))).accepted)
+_stale = evaluate(job("Data Analyst", _FRESH_DESC, posted_at=_ago(40)))
+check("a 40-day-old posting is dropped",
+      not _stale.accepted and "days ago" in _stale.reason, _stale.reason)
+check("a posting with no date is kept, not assumed stale",
+      evaluate(job("Data Analyst", _FRESH_DESC)).accepted)
+
+_original_age = _config.MAX_AGE_DAYS
+try:
+    _config.MAX_AGE_DAYS = 0
+    check("MAX_AGE_DAYS=0 disables the check",
+          evaluate(job("Data Analyst", _FRESH_DESC, posted_at=_ago(400))).accepted)
+finally:
+    _config.MAX_AGE_DAYS = _original_age
+
+
 if __name__ == "__main__":
     passed = sum(1 for ok, _, _ in _results if ok)
     total = len(_results)

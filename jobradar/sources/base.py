@@ -75,6 +75,30 @@ class Job:
         return "h:" + hashlib.sha1(seed.encode("utf-8")).hexdigest()[:16]
 
     @property
+    def age_days(self) -> float | None:
+        """Days since posting, or None when the source gave no usable date.
+
+        None is meaningfully different from "old": plenty of postings carry no
+        timestamp at all, and treating those as stale would silently discard
+        them. Callers decide what unknown means; the filters let it through.
+        """
+        if not self.posted_at:
+            return None
+        from datetime import datetime, timezone
+
+        try:
+            stamp = datetime.fromisoformat(str(self.posted_at).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+
+        seconds = (datetime.now(timezone.utc) - stamp).total_seconds()
+        # Clamp: a posting dated slightly in the future (timezone rounding at
+        # the source) is brand new, not invalid.
+        return max(0.0, seconds / 86400)
+
+    @property
     def haystack(self) -> str:
         """Lowercased title + description — what the keyword layers search."""
         return f"{self.title}\n{self.description}".lower()
