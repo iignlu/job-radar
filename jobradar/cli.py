@@ -12,6 +12,7 @@ from .filters import evaluate
 from .notify import ChatIdUnavailable, Telegram, describe_bot, resolve_chat_id
 from .sources.ats import ATSSource
 from .sources.demo import DemoSource
+from .sources.linkedin_email import from_config as linkedin_from_config
 from .sources.jsearch import JSearchSource
 from .state import SeenStore
 
@@ -51,6 +52,10 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="check credentials and connectivity, then exit",
     )
     parser.add_argument(
+        "--dump-linkedin", action="store_true",
+        help="print the structure of your LinkedIn alert emails and exit",
+    )
+    parser.add_argument(
         "--resolve-chat-id", action="store_true",
         help="print your Telegram chat id (from getUpdates) and exit",
     )
@@ -80,6 +85,12 @@ def build_sources(args) -> list:
     # application form rather than an aggregator that may demand an account.
     if config.ENABLE_ATS and config.ATS_BOARDS:
         sources.append(ATSSource(config.ATS_BOARDS))
+
+    # LinkedIn, read out of your own alert emails. Silently absent unless
+    # IMAP credentials are configured, so nothing breaks without them.
+    linkedin = linkedin_from_config(dump=getattr(args, "dump_linkedin", False))
+    if linkedin:
+        sources.append(linkedin)
 
     sources.append(
         JSearchSource(
@@ -181,6 +192,17 @@ def main(argv=None) -> int:
 
     if args.doctor:
         return doctor()
+
+    if args.dump_linkedin:
+        source = linkedin_from_config(dump=True)
+        if not source:
+            _log.error("IMAP_USER and IMAP_PASSWORD are not set — nothing to read")
+            return 2
+        found = source.fetch()
+        _log.info("extracted %d posting(s)", len(found))
+        for job in found[:15]:
+            print(f"  {job.native_id}  {job.title}")
+        return 0
 
     if args.resolve_chat_id:
         try:

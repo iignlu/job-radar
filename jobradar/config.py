@@ -84,6 +84,25 @@ ATS_BOARDS = [
 
 ENABLE_ATS = True
 
+# --------------------------------------------------------------------------
+# LinkedIn, via your own job-alert emails
+# --------------------------------------------------------------------------
+
+# LinkedIn has no public jobs API, and scripting the endpoints its site uses
+# violates the User Agreement and gets blocked. A job alert you asked LinkedIn
+# to send you is a different thing entirely: it arrives in your inbox by
+# design, and reading your own mail breaks nothing.
+#
+# Needs IMAP_USER and IMAP_PASSWORD. On Gmail that means an App Password
+# (Google Account -> Security -> 2-Step Verification -> App passwords), never
+# your account password. Leave either unset and this source stays off.
+IMAP_HOST = "imap.gmail.com"
+IMAP_MAILBOX = "INBOX"
+LINKEDIN_ALERT_SENDER = "jobalerts-noreply@linkedin.com"
+
+# How far back to read. Alerts repeat roles, and dedup handles the overlap.
+LINKEDIN_ALERT_DAYS = 7
+
 ATS_COMPANIES = [
     # --- Saudi tech & startups: most likely to run Greenhouse/Lever/Ashby
     ("Tamara", "tamara"),

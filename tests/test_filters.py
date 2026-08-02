@@ -336,6 +336,45 @@ finally:
     _config.MAX_AGE_DAYS = _original_age
 
 
+# 16 — LinkedIn alert-email parsing
+from jobradar.sources.linkedin_email import LinkedInEmailSource  # noqa: E402
+
+_li = LinkedInEmailSource("h", "u", "p")
+
+# Shape of a real alert: tracking-laden links, title as the anchor text.
+_MAIL = """
+<table><tr><td>
+<a href="https://www.linkedin.com/comm/jobs/view/4123456789/?trk=eml-x&amp;lipi=abc">
+  Graduate Software Engineer</a><br/>Tamara - Riyadh
+</td></tr><tr><td>
+<a href="https://www.linkedin.com/comm/jobs/view/4987654321/?trk=eml-y">
+  Junior Data Analyst</a><br/>stc - Riyadh
+</td></tr></table>
+"""
+_found = _li._postings(_MAIL)
+check("extracts every job link", len(_found) == 2, list(_found))
+check("job id is the stable part of the URL", "4123456789" in _found, list(_found))
+check("HTML entities in the URL are decoded",
+      "&amp;" not in _found["4123456789"][0], _found["4123456789"][0])
+
+_dupe = _li._postings(_MAIL + _MAIL)
+check("the same job repeated in one mail is counted once", len(_dupe) == 2)
+
+check("a mail with no job links yields nothing, without raising",
+      _li._postings("<p>Your job alert is ready</p>") == {})
+check("linkedin-email costs no API quota", _li.request_cost == 0)
+
+# Not configured -> source is simply absent, rather than a crash at build time.
+import os as _os  # noqa: E402
+_saved = (_os.environ.pop("IMAP_USER", None), _os.environ.pop("IMAP_PASSWORD", None))
+try:
+    from jobradar.sources.linkedin_email import from_config as _from_config  # noqa: E402
+    check("no IMAP credentials -> source is skipped, not fatal", _from_config() is None)
+finally:
+    if _saved[0]: _os.environ["IMAP_USER"] = _saved[0]
+    if _saved[1]: _os.environ["IMAP_PASSWORD"] = _saved[1]
+
+
 if __name__ == "__main__":
     passed = sum(1 for ok, _, _ in _results if ok)
     total = len(_results)
