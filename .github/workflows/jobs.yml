@@ -31,6 +31,10 @@ on:
         description: "Max messages this run (blank = config default)"
         type: string
         default: ""
+      dump_linkedin:
+        description: "Inspect LinkedIn alert emails instead of running (diagnostic)"
+        type: boolean
+        default: false
 
 # Needed to commit seen.json back to the repository.
 permissions:
@@ -61,14 +65,22 @@ jobs:
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # LinkedIn job alerts, read from your own mailbox. Unset means the
+          # source is skipped entirely — it is additive, never required.
+          IMAP_USER: ${{ secrets.IMAP_USER }}
+          IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
           # Empty on scheduled runs, so config.py stays the source of truth.
           DATE_POSTED: ${{ inputs.date_posted }}
           LIMIT: ${{ inputs.limit }}
+          DUMP_LINKEDIN: ${{ inputs.dump_linkedin }}
         run: |
           set -euo pipefail
           args=""
-          [ -n "${DATE_POSTED:-}" ] && args="$args --date-posted $DATE_POSTED"
-          [ -n "${LIMIT:-}" ] && args="$args --limit $LIMIT"
+          [ "${DUMP_LINKEDIN:-}" = "true" ] && args="--dump-linkedin"
+          if [ -z "$args" ]; then
+            [ -n "${DATE_POSTED:-}" ] && args="$args --date-posted $DATE_POSTED"
+            [ -n "${LIMIT:-}" ] && args="$args --limit $LIMIT"
+          fi
           echo "running: python -m jobradar $args"
           python -m jobradar $args
 
