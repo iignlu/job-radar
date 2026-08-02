@@ -58,13 +58,15 @@ PROVIDERS = {
 }
 
 
-# A slug no company could own. Providers that answer 200 for this are
-# permissive: they return a valid, empty board for any slug at all, so "the
-# request succeeded" tells you nothing. Without this control the first version
-# of this script reported all 50 companies as matches — an empty board and a
-# nonexistent one were indistinguishable, which is the same failure the probe
-# exists to prevent.
-CONTROL_SLUG = "zzz-no-such-company-9f3a1b"
+# Slugs no company owns, used to characterise how each provider answers a bad
+# request. Several shapes, because a single hyphenated string was not
+# representative: Workable 404s on "zzz-no-such-company-9f3a1b" but answers 200
+# for plausible short slugs, so one control marked it strict when it is not.
+CONTROL_SLUGS = [
+    "zzz-no-such-company-9f3a1b",
+    "qxvbnmzzt",
+    "notarealco",
+]
 
 
 def probe(provider: str, slug: str):
@@ -93,8 +95,10 @@ def find_permissive_providers() -> set:
     """Which providers answer 200 for a slug that cannot exist."""
     permissive = set()
     for provider in PROVIDERS:
-        if probe(provider, CONTROL_SLUG) is not None:
-            permissive.add(provider)
+        for control in CONTROL_SLUGS:
+            if probe(provider, control) is not None:
+                permissive.add(provider)
+                break
     return permissive
 
 
@@ -128,9 +132,11 @@ def main(argv=None):
                 continue
             provider, _slug, count = result
             name, slug = futures[future]
-            # A strict provider 404s on a bad slug, so any answer proves the
-            # board. A permissive one proves nothing unless jobs came back.
-            target = confirmed if (count > 0 or provider not in permissive) else weak
+            # Only a board with jobs on it counts. Provider behaviour on bad
+            # slugs varies too much to infer existence from a 200 — and a board
+            # with zero jobs is unusable anyway, so the stricter rule costs
+            # nothing and removes a whole class of false positive.
+            target = confirmed if count > 0 else weak
             target.setdefault((name, slug), []).append(result)
 
     if confirmed:
