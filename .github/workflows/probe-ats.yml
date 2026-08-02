@@ -1,0 +1,30 @@
+# Manual-only. Finds which ATS provider each company on the watchlist uses,
+# so ATS sources are wired against confirmed boards rather than guessed slugs.
+#
+# Runs here rather than locally because these boards are public but not always
+# reachable from a restricted network, and the runner has open egress.
+# Consumes no API quota — every endpoint probed is free and unauthenticated.
+name: probe-ats
+
+on:
+  workflow_dispatch:
+    inputs:
+      slugs:
+        description: "Space-separated slugs to probe (blank = the whole watchlist)"
+        type: string
+        default: ""
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Probe ATS boards
+        env:
+          SLUGS: ${{ inputs.slugs }}
+        run: python tools/probe_ats.py ${SLUGS}

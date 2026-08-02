@@ -46,6 +46,85 @@ DATE_POSTED = "today"
 JOB_REQUIREMENTS = ""
 
 # --------------------------------------------------------------------------
+# ATS watchlist — companies whose own job boards we want to poll
+# --------------------------------------------------------------------------
+
+# Why this exists: aggregator apply links increasingly sit behind a signup or
+# a paid plan. A company's own ATS board is the opposite — the link IS the
+# employer's form, it costs no API quota, and roles usually appear there hours
+# before Google indexes them.
+#
+# Selection: Saudi employers with a strong reputation as places to work, biased
+# toward those that actually hire software and data graduates. Sourced from
+# LinkedIn Top Companies KSA, Great Place to Work KSA, and the Saudi tech
+# scene. See README for the reasoning.
+#
+# The second element is a CANDIDATE board slug, not a confirmed one. Slugs are
+# usually the company name lowercased, but plenty are not, and a wrong slug is
+# indistinguishable from a company with no open roles. Run tools/probe_ats.py
+# (or the probe-ats workflow) to find out which are real before wiring any of
+# these into build_sources().
+ATS_COMPANIES = [
+    # --- Saudi tech & startups: most likely to run Greenhouse/Lever/Ashby
+    ("Tamara", "tamara"),
+    ("Tabby", "tabby"),
+    ("Foodics", "foodics"),
+    ("Salla", "salla"),
+    ("Unifonic", "unifonic"),
+    ("Jahez", "jahez"),
+    ("Nana", "nana"),
+    ("Lean Technologies", "leantech"),
+    ("Sary", "sary"),
+    ("Mrsool", "mrsool"),
+    ("Zid", "zid"),
+    ("Rasan", "rasan"),
+    ("Hakbah", "hakbah"),
+    ("Lucidya", "lucidya"),
+    ("stc pay", "stcpay"),
+    ("Almosafer", "almosafer"),
+    ("Floward", "floward"),
+    ("Geidea", "geidea"),
+    ("HungerStation", "hungerstation"),
+    ("Ninja", "ninja"),
+    ("Moyasar", "moyasar"),
+    ("PayTabs", "paytabs"),
+    ("Tarabut", "tarabut"),
+    ("Sadad", "sadad"),
+
+    # --- National tech & Vision 2030 giga-projects
+    ("Elm", "elm"),
+    ("Thiqah", "thiqah"),
+    ("Takamol Holding", "takamol"),
+    ("SDAIA", "sdaia"),
+    ("Aramco Digital", "aramcodigital"),
+    ("Cyberani", "cyberani"),
+    ("NEOM", "neom"),
+    ("Saudi Aramco", "aramco"),
+    ("SABIC", "sabic"),
+    ("Ma'aden", "maaden"),
+    ("stc", "stc"),
+    ("Mobily", "mobily"),
+    ("Zain KSA", "zain"),
+    ("Red Sea Global", "redseaglobal"),
+    ("Qiddiya", "qiddiya"),
+    ("Diriyah Company", "diriyah"),
+    ("ROSHN", "roshn"),
+    ("PIF", "pif"),
+
+    # --- Banking & insurance: large in-house data/engineering teams
+    ("Al Rajhi Bank", "alrajhibank"),
+    ("Saudi National Bank", "snb"),
+    ("Riyad Bank", "riyadbank"),
+    ("Alinma Bank", "alinma"),
+    ("Tawuniya", "tawuniya"),
+    ("Bupa Arabia", "bupa"),
+    ("SIDF", "sidf"),
+
+    # --- Consulting: heavy graduate intake
+    ("Accenture Middle East", "accenture"),
+]
+
+# --------------------------------------------------------------------------
 # Matching — the keyword layers
 # --------------------------------------------------------------------------
 
