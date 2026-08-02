@@ -41,6 +41,13 @@ _NON_TITLES = {
     "unsubscribe", "see more jobs", "view job posting",
 }
 
+# Badges LinkedIn appends to a card's byline; noise once easy_apply is read.
+_BADGES = [
+    r"easy apply", r"\d+\s+company alum\w*", r"\d+\s+(?:school )?alum\w*",
+    r"actively (?:reviewing|hiring)", r"be an early applicant",
+    r"promoted", r"viewed", r"\d+ connections?",
+]
+
 
 def _clean(text: str) -> str:
     return _WS_RE.sub(" ", text or "").strip()
@@ -158,8 +165,34 @@ class LinkedInEmailSource(Source):
             if title.lower() in _NON_TITLES or len(title) > 160:
                 title = ""
 
-            previous_url, previous_title = found.get(job_id, ("", ""))
-            found[job_id] = (previous_url or url, title or previous_title)
+            # The card's byline sits after the title anchor: "COMPANY · City,
+            # Country", sometimes followed by badges like "Easy Apply" or
+            # "3 company alumni". Stop at the next job link so one card cannot
+            # bleed into the next.
+            company = location = ""
+            easy_apply = False
+            if title and close != -1:
+                tail = body[close + 4: close + 1200]
+                boundary = tail.find("/jobs/view/")
+                if boundary != -1:
+                    tail = tail[:boundary]
+                byline = _clean(_html.unescape(_TAG_RE.sub(" ", tail)))
+                easy_apply = "easy apply" in byline.lower()
+                for noise in _BADGES:
+                    byline = re.sub(noise, " ", byline, flags=re.IGNORECASE)
+                parts = [p.strip() for p in re.split(r"[·•]", byline) if p.strip()]
+                if parts:
+                    company = parts[0][:120]
+                    location = parts[1][:120] if len(parts) > 1 else ""
+
+            previous = found.get(job_id) or {}
+            found[job_id] = {
+                "url": previous.get("url") or url,
+                "title": title or previous.get("title", ""),
+                "company": company or previous.get("company", ""),
+                "location": location or previous.get("location", ""),
+                "easy_apply": easy_apply or previous.get("easy_apply", False),
+            }
         return found
 
     def fetch(self) -> list[Job]:
@@ -179,8 +212,12 @@ class LinkedInEmailSource(Source):
 
             if self.dump:
                 _log.info("--- %s -> %d link(s)", subject[:70], len(postings))
-                for job_id, (url, title) in list(postings.items())[:5]:
-                    _log.info("    %s | %s", job_id, title[:70] or "(no title found)")
+                for job_id, card in list(postings.items())[:6]:
+                    _log.info("    %s | %s | %s | %s%s",
+                              job_id, (card["title"] or "(no title)")[:44],
+                              (card["company"] or "?")[:26],
+                              (card["location"] or "?")[:24],
+                              " | EASY APPLY" if card["easy_apply"] else "")
 
                 # Print the raw markup around the first link. Guessing at the
                 # layout is what produced "(no title found)" — this shows what
@@ -191,20 +228,26 @@ class LinkedInEmailSource(Source):
                     condensed = _WS_RE.sub(" ", window.replace("\n", " "))
                     _log.info("    RAW CONTEXT: %s", condensed[:1200])
 
-            for job_id, (url, title) in postings.items():
+            for job_id, card in postings.items():
+                url = card["url"]
+                # Easy Apply means the application happens inside LinkedIn —
+                # no external site, no second signup. Worth surfacing, since a
+                # gated apply link is the main reason a matched job is useless.
+                publisher = "LinkedIn ⚡ Easy Apply" if card["easy_apply"] else "LinkedIn"
                 jobs.append(Job(
                     # Untitled postings are still sent: this source is not
                     # title-filtered, so a missing title costs presentation,
                     # not correctness. The id at least makes the link openable.
-                    title=title or f"LinkedIn job {job_id}",
-                    company=_clean(subject.split(" - ")[-1]) or "via LinkedIn alert",
+                    title=card["title"] or f"LinkedIn job {job_id}",
+                    company=card["company"] or "via LinkedIn alert",
                     url=url,
                     source=self.name,
                     description="",
+                    city=card["location"] or None,
                     country="Saudi Arabia",
-                    publisher="LinkedIn",
+                    publisher=publisher,
                     native_id=job_id,
-                    apply_options=[{"publisher": "LinkedIn", "url": url,
+                    apply_options=[{"publisher": publisher, "url": url,
                                     "is_direct": False}],
                 ))
 

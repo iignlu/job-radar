@@ -357,15 +357,41 @@ _MAIL = """
 _found = _li._postings(_MAIL)
 check("extracts every distinct job", len(_found) == 2, list(_found))
 check("logo link does not win over the title link",
-      _found["4444591579"][1] == "Graduate Software Engineer", _found["4444591579"])
+      _found["4444591579"]["title"] == "Graduate Software Engineer", _found["4444591579"])
 check("nested markup is stripped from the title",
-      "<strong>" not in _found["4444591579"][1])
+      "<strong>" not in _found["4444591579"]["title"])
 check("second job titled too",
-      _found["4445838382"][1] == "Junior Data Analyst", _found["4445838382"])
+      _found["4445838382"]["title"] == "Junior Data Analyst", _found["4445838382"])
 check("HTML entities in the URL are decoded",
-      "&amp;" not in _found["4444591579"][0], _found["4444591579"][0])
+      "&amp;" not in _found["4444591579"]["url"], _found["4444591579"]["url"])
 check("a mail with no job links yields nothing, without raising",
       _li._postings("<p>Your job alert is ready</p>") == {})
+
+# Card structure from a real alert (screenshot-verified): title anchor, then a
+# byline "COMPANY · City, Country", then badges. Arabic company names and
+# HTML-escaped ampersands both occur in practice.
+_CARD = """
+<td class="pr-2 w-6" width="48"><a href="https://www.linkedin.com/comm/jobs/view/4444830047?trk=a"><img src="l.png"/></a></td>
+<td><a href="https://www.linkedin.com/comm/jobs/view/4444830047?trk=b"><strong>App support-Fresh graduate</strong></a>
+<p>TAWANTECH &middot; Riyadh, Riyadh, Saudi Arabia</p><p>Easy Apply</p></td>
+<td class="pr-2 w-6" width="48"><a href="https://www.linkedin.com/comm/jobs/view/4445838382?trk=c"><img src="l.png"/></a></td>
+<td><a href="https://www.linkedin.com/comm/jobs/view/4445838382?trk=d">Full Stack Engineer</a>
+<p>Kafaa Capital - \u0643\u0641\u0627\u0621\u0629 \u0627\u0644\u0645\u0627\u0644\u064a\u0629 &middot; Riyadh, Saudi Arabia</p>
+<p>1 company alum</p></td>
+"""
+_cards = _li._postings(_CARD)
+check("byline yields the company", _cards["4444830047"]["company"] == "TAWANTECH",
+      _cards["4444830047"]["company"])
+check("byline yields the location",
+      "Riyadh" in _cards["4444830047"]["location"], _cards["4444830047"]["location"])
+check("Easy Apply is detected", _cards["4444830047"]["easy_apply"] is True)
+check("absent Easy Apply is not invented", _cards["4445838382"]["easy_apply"] is False)
+check("Arabic company names survive",
+      "\u0643\u0641\u0627\u0621\u0629" in _cards["4445838382"]["company"], _cards["4445838382"]["company"])
+check("alum badge stripped from the company",
+      "alum" not in _cards["4445838382"]["company"].lower(), _cards["4445838382"]["company"])
+check("one card does not bleed into the next",
+      "Full Stack" not in _cards["4444830047"]["company"], _cards["4444830047"])
 
 # LinkedIn alerts skip our filters: the saved search already did that job.
 check("linkedin-email is declared pre-filtered",
