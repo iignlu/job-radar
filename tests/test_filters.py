@@ -455,6 +455,29 @@ check("trusted source is STILL rejected when senior",
       not evaluate(_li_senior, trust_source=True).accepted)
 
 
+# 19 — links must survive copy-paste into WhatsApp
+from jobradar.notify import format_job, shareable_url  # noqa: E402
+
+_LI = ("https://www.linkedin.com/comm/jobs/view/4444591579?alertAction=markasviewed"
+       "&savedSearchId=5466482073&trackingId=nULZ7Qf&refId=qnmQZ&lipi=urn%3Ali"
+       "&midToken=AQGPH&midSig=3QZmM&trk=eml-email_job_alert")
+check("tracking parameters are stripped",
+      len(shareable_url(_LI)) < 80, f"{len(shareable_url(_LI))} chars")
+check("the path is preserved", "/jobs/view/4444591579" in shareable_url(_LI))
+check("a clean url is left alone",
+      shareable_url("https://elm.sa/careers/12") == "https://elm.sa/careers/12")
+check("a malformed url does not crash", shareable_url("not a url") == "not a url")
+check("empty url stays empty", shareable_url("") == "")
+
+# The whole point: the address must appear as text, not hidden in an anchor,
+# or copying the message to forward it yields "Apply" and no link.
+_msg = format_job(job("Data Analyst", "x", url="https://elm.sa/careers/12"), "reason")
+check("the URL appears as plain text in the body",
+      "https://elm.sa/careers/12" in _msg, _msg)
+check("the primary link is not wrapped in an anchor",
+      '<a href="https://elm.sa/careers/12"' not in _msg, _msg)
+
+
 if __name__ == "__main__":
     passed = sum(1 for ok, _, _ in _results if ok)
     total = len(_results)
