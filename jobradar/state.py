@@ -26,6 +26,12 @@ class SeenStore:
         self.keys: list[str] = []
         self._index: set[str] = set()
 
+        # Resolved Telegram chat id, cached here so it survives getUpdates
+        # expiry. Telegram keeps only ~24h of updates, so a bot that derives
+        # its chat id every run stops working the first quiet day — which is
+        # exactly what happened: four consecutive runs aborted before sending.
+        self.chat_id: str = ""
+
         # first_run drives the "do not spam on day one" branch in cli.py.
         # A corrupt file counts as a first run: we cannot tell what was already
         # sent, and re-arming quietly beats firing fifty notifications.
@@ -46,6 +52,7 @@ class SeenStore:
 
         self.keys = [str(k) for k in keys]
         self._index = set(self.keys)
+        self.chat_id = str(payload.get("chat_id") or "")
         self.first_run = False
         _log.info("loaded %d seen key(s) from %s", len(self.keys), self.path)
 
@@ -81,6 +88,9 @@ class SeenStore:
         payload = {
             "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "count": len(self.keys),
+            # Not a credential: the chat id is useless without the bot token,
+            # which stays in Actions secrets and never lands in the repo.
+            "chat_id": self.chat_id,
             "keys": self.keys,
         }
         self.path.parent.mkdir(parents=True, exist_ok=True)

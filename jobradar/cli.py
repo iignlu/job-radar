@@ -104,6 +104,42 @@ def build_sources(args) -> list:
     return sources
 
 
+def chat_id_for_run(configured: str, store, token: str, dry_run: bool = False,
+                    resolver=resolve_chat_id) -> str:
+    """Settle on a chat id, in descending order of durability.
+
+    1. the TELEGRAM_CHAT_ID secret — set once, never expires
+    2. the value cached in the state file — survives getUpdates expiry
+    3. getUpdates — only works within ~24h of you last messaging the bot
+
+    Step 2 exists because step 3 alone is not a foundation. Telegram retains
+    updates for roughly a day, so the first quiet day left the bot with no way
+    to address anyone: four consecutive scheduled runs aborted here, and
+    because a bot that sends nothing looks exactly like a quiet week, nobody
+    noticed until the fifth.
+
+    Whatever is settled on is written back to the store, so the id is cached
+    even when it came from the secret — that keeps the fallback warm if the
+    secret is ever rotated away.
+
+    Raises ChatIdUnavailable when a send is expected and no id can be found.
+    """
+    chat_id = configured
+    if chat_id:
+        _log.info("using TELEGRAM_CHAT_ID from the environment")
+    elif store.chat_id:
+        chat_id = store.chat_id
+        _log.info("using chat id %s cached in %s", chat_id, store.path)
+    elif token and not dry_run:
+        chat_id = resolver(token)
+        _log.info("resolved TELEGRAM_CHAT_ID=%s from getUpdates", chat_id)
+        _log.info("set it as a repository secret to skip this lookup in future")
+
+    if chat_id:
+        store.chat_id = chat_id
+    return chat_id
+
+
 def _sort_key(pair):
     """Newest first. Postings with no timestamp sort last under reverse=True."""
     job, _verdict = pair
@@ -136,15 +172,22 @@ def doctor() -> int:
             problems += 1
             token = ""
 
-    # --- Telegram chat id
+    # --- Telegram chat id. Reported in the same precedence the run uses, so
+    # this output answers "where is the bot getting its chat id from today?"
     chat_id = config.env("TELEGRAM_CHAT_ID", required=False)
+    cached = SeenStore(config.STATE_PATH, max_keys=config.MAX_SEEN_KEYS).chat_id
     if chat_id:
         print(f"OK    TELEGRAM_CHAT_ID set explicitly ({chat_id})")
+    elif cached:
+        print(f"OK    TELEGRAM_CHAT_ID not set, using the id cached in "
+              f"{config.STATE_PATH} ({cached})")
+        print("      Set it as a secret so it does not depend on the state file.")
     elif token:
         try:
             resolved = resolve_chat_id(token)
             print(f"OK    TELEGRAM_CHAT_ID not set, but resolved from getUpdates: {resolved}")
-            print("      Set it as a secret to avoid resolving it every run.")
+            print("      Set it as a secret: getUpdates only keeps ~24h of history,")
+            print("      so this lookup stops working the first quiet day.")
         except (ChatIdUnavailable, HttpError) as exc:
             print(f"FAIL  could not resolve a chat id: {exc}")
             problems += 1
@@ -224,17 +267,15 @@ def main(argv=None) -> int:
         _log.error("%s", exc)
         return 2
 
-    # Chat id is optional config: if it is absent we derive it from the bot's
-    # own updates. One less secret to set up, and it works identically on the
-    # Actions runner. Explicitly-set values always win.
-    if not chat_id and token and not args.dry_run:
-        try:
-            chat_id = resolve_chat_id(token)
-            _log.info("resolved TELEGRAM_CHAT_ID=%s from getUpdates", chat_id)
-            _log.info("set it as a repository secret to skip this lookup in future")
-        except ChatIdUnavailable as exc:
-            _log.error("%s", exc)
-            return 2
+    # Loaded before the chat-id block because the store is where a previously
+    # resolved chat id lives.
+    store = SeenStore(config.STATE_PATH, max_keys=config.MAX_SEEN_KEYS)
+
+    try:
+        chat_id = chat_id_for_run(chat_id, store, token, dry_run=args.dry_run)
+    except ChatIdUnavailable as exc:
+        _log.error("%s", exc)
+        return 2
 
     telegram = Telegram(token, chat_id, dry_run=args.dry_run)
 
@@ -259,8 +300,6 @@ def main(argv=None) -> int:
     jobs = list(unique.values())
     if len(jobs) != len(fetched):
         _log.info("deduped %d -> %d posting(s)", len(fetched), len(jobs))
-
-    store = SeenStore(config.STATE_PATH, max_keys=config.MAX_SEEN_KEYS)
 
     # ---- first run -------------------------------------------------------
     # CRITICAL: on a first run every posting in the window looks "new", so
