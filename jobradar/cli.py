@@ -59,6 +59,10 @@ def parse_args(argv=None) -> argparse.Namespace:
         "--resolve-chat-id", action="store_true",
         help="print your Telegram chat id (from getUpdates) and exit",
     )
+    parser.add_argument(
+        "--probe-jsearch", action="store_true",
+        help="test JSearch parameters one at a time and exit (costs ~5 requests)",
+    )
     return parser.parse_args(argv)
 
 
@@ -245,6 +249,20 @@ def main(argv=None) -> int:
         _log.info("extracted %d posting(s)", len(found))
         for job in found[:15]:
             print(f"  {job.native_id}  {job.title}")
+        return 0
+
+    if args.probe_jsearch:
+        try:
+            JSearchSource(
+                api_key=config.env("RAPIDAPI_KEY"),
+                queries=config.QUERIES,
+                country=config.COUNTRY,
+                date_posted=args.date_posted or config.DATE_POSTED,
+                job_requirements=config.JOB_REQUIREMENTS,
+            ).probe()
+        except config.MissingSetting as exc:
+            _log.error("%s", exc)
+            return 2
         return 0
 
     if args.resolve_chat_id:

@@ -35,6 +35,10 @@ on:
         description: "Inspect LinkedIn alert emails instead of running (diagnostic)"
         type: boolean
         default: false
+      probe_jsearch:
+        description: "Test JSearch parameters one at a time (diagnostic, ~5 requests)"
+        type: boolean
+        default: false
 
 # Needed to commit seen.json back to the repository.
 permissions:
@@ -73,10 +77,12 @@ jobs:
           DATE_POSTED: ${{ inputs.date_posted }}
           LIMIT: ${{ inputs.limit }}
           DUMP_LINKEDIN: ${{ inputs.dump_linkedin }}
+          PROBE_JSEARCH: ${{ inputs.probe_jsearch }}
         run: |
           set -euo pipefail
           args=""
           [ "${DUMP_LINKEDIN:-}" = "true" ] && args="--dump-linkedin"
+          [ "${PROBE_JSEARCH:-}" = "true" ] && args="--probe-jsearch"
           if [ -z "$args" ]; then
             [ -n "${DATE_POSTED:-}" ] && args="$args --date-posted $DATE_POSTED"
             [ -n "${LIMIT:-}" ] && args="$args --limit $LIMIT"
