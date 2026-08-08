@@ -328,6 +328,37 @@ ALLOW_REMOTE = True
 MAX_MESSAGES_PER_RUN = 12
 
 # --------------------------------------------------------------------------
+# Liveness — making silence mean one thing instead of five
+# --------------------------------------------------------------------------
+#
+# The bot's normal output on a quiet day is nothing at all. That is also its
+# output when the chat id has expired, when a run never got a runner, when a
+# source has died, and when it is simply the weekend. Five different states,
+# one indistinguishable symptom — which is why both outages so far were
+# spotted by a human noticing the quiet rather than by the system.
+#
+# After this many consecutive runs that delivered nothing, say so out loud.
+# 3 is one full working day: quiet enough not to nag, frequent enough that a
+# genuine outage surfaces the same day it starts.
+HEARTBEAT_AFTER_SILENT_RUNS = 3
+
+# Plain-language schedule, quoted in the heartbeat so "when should I next hear
+# from you?" is answered in the message itself. Keep in step with the cron in
+# .github/workflows/jobs.yml — they are two statements of the same fact.
+SCHEDULE_HUMAN = "09:00, 14:00 and 19:00 Riyadh time, Sunday–Thursday"
+
+# Watchdog threshold, in hours. A run that never starts cannot report its own
+# failure — GitHub cancelled one after fifteen minutes without ever giving it
+# a runner, and no step ran, so nothing could raise the alarm. The watchdog
+# workflow runs on its own schedule and checks how long ago the state file was
+# last written; anything past this is silence that has gone on too long.
+#
+# 8 hours, checked after the second run of the working day: by then two runs
+# should have written state, so a fresh file is ~1.5h old and a stale one is
+# unambiguous. Both workflows would have to fail together to hide an outage.
+WATCHDOG_MAX_SILENCE_HOURS = 8
+
+# --------------------------------------------------------------------------
 # Presentation
 # --------------------------------------------------------------------------
 

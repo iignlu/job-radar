@@ -90,6 +90,38 @@ jobs:
           echo "running: python -m jobradar $args"
           python -m jobradar $args
 
+      # If the run above died, the bot cannot tell you — it died before the
+      # part that sends messages. So the workflow tells you instead, with curl
+      # rather than Python, so a syntax error or a crashed interpreter cannot
+      # take the alarm down with it.
+      #
+      # Chat id comes from the secret, falling back to the one cached in
+      # seen.json, so the alarm still works in exactly the situation that
+      # caused the first outage.
+      - name: Report failure to Telegram
+        if: failure()
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set +e
+          CHAT="${TELEGRAM_CHAT_ID:-}"
+          if [ -z "$CHAT" ] && [ -f seen.json ]; then
+            CHAT=$(python -c "import json;print(json.load(open('seen.json')).get('chat_id',''))" 2>/dev/null)
+          fi
+          if [ -z "${TELEGRAM_TOKEN:-}" ] || [ -z "$CHAT" ]; then
+            echo "no Telegram credentials available - cannot report failure"
+            exit 0
+          fi
+          curl -sS -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            -d "chat_id=${CHAT}" \
+            -d "disable_web_page_preview=true" \
+            --data-urlencode "text=🔴 job-radar run FAILED — no jobs were sent this run. Nothing is lost: unsent matches are not marked seen and will arrive on the next successful run. Details: ${RUN_URL}" \
+            >/dev/null
+          echo "failure reported to Telegram"
+
       - name: Commit seen.json
         run: |
           set -euo pipefail
