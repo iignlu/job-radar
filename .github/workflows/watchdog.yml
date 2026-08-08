@@ -1,0 +1,43 @@
+# Dead-man's switch for the alert workflow.
+#
+# jobs.yml can report its own failures, but only if it runs. A scheduled run
+# was once cancelled after fifteen minutes without ever being given a runner:
+# no step executed, so nothing raised an alarm and the outage was
+# indistinguishable from a quiet evening.
+#
+# This workflow answers the question jobs.yml cannot ask about itself — when
+# did the bot last do anything at all? — from a separate schedule, so both
+# would have to fail together to hide an outage.
+name: watchdog
+
+on:
+  schedule:
+    # 12:30 UTC (15:30 Riyadh), Sunday–Thursday: after the 06:00 and 11:00
+    # alert runs, so on a healthy day the state file is ~1.5h old and a stale
+    # one is unambiguous. Deliberately NOT on the same cron as jobs.yml —
+    # a shared trigger is a shared failure.
+    - cron: "30 12 * * 0-4"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # No install step: the project is standard-library-only by design.
+
+      - name: Check for silence
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python tools/watchdog.py

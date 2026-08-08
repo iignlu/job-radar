@@ -17,7 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jobradar.cli import chat_id_for_run  # noqa: E402
+from jobradar import config  # noqa: E402
+from jobradar.cli import chat_id_for_run, heartbeat_message, record_silence  # noqa: E402
 from jobradar.state import SeenStore  # noqa: E402
 
 _results: list[tuple[bool, str, str]] = []
@@ -134,6 +135,63 @@ with tempfile.TemporaryDirectory() as _tmp:
     got = chat_id_for_run("", fresh(""), "tok", dry_run=True, resolver=resolver)
     check("a dry run resolves to nothing rather than calling getUpdates",
           got == "" and calls == [], str(calls))
+
+    # 9 — the silent-run counter, which is what turns "no news" into a signal
+    # instead of an ambiguity. Both outages so far were spotted by a human
+    # noticing the quiet; this is the field that lets the bot notice instead.
+    path = store_path(tmp, "silent.json")
+    store = SeenStore(path)
+    check("a fresh store starts with no silent runs", store.silent_runs == 0)
+    store.silent_runs = 2
+    store.add("a")
+    store.save()
+    check("the silent-run count is persisted", SeenStore(path).silent_runs == 2)
+
+    legacy = store_path(tmp, "legacy2.json")
+    legacy.write_text(json.dumps({"keys": ["a"], "chat_id": "1"}))
+    check("a state file written before the counter existed reads as 0",
+          SeenStore(legacy).silent_runs == 0)
+
+    for junk in ("nonsense", None, -5, 1.9):
+        legacy.write_text(json.dumps({"keys": ["a"], "silent_runs": junk}))
+        value = SeenStore(legacy).silent_runs
+        check(f"a {junk!r} silent-run value degrades to a sane int",
+              isinstance(value, int) and value >= 0, repr(value))
+
+    # 10 — when the bot decides to break its own silence
+    threshold = config.HEARTBEAT_AFTER_SILENT_RUNS
+    store = SeenStore(store_path(tmp, "beat.json"))
+
+    fired = [record_silence(store, delivered=False) for _ in range(threshold)]
+    check("silence below the threshold stays quiet",
+          all(f == 0 for f in fired[:-1]), str(fired))
+    check("the threshold run speaks up", fired[-1] == threshold, str(fired))
+    check("the counter resets after speaking", store.silent_runs == 0)
+
+    # It must not then repeat on every subsequent run — one note per stretch.
+    check("the run straight after a heartbeat is quiet again",
+          record_silence(store, delivered=False) == 0)
+
+    # Delivering anything resets the count, so a single good run clears it.
+    store.silent_runs = threshold - 1
+    check("delivering jobs suppresses the heartbeat",
+          record_silence(store, delivered=True) == 0)
+    check("delivering jobs zeroes the counter", store.silent_runs == 0)
+
+    # The message has to distinguish "nothing matched" from "nothing worked",
+    # which is the entire point — so a dead source must be named as dead.
+    body = heartbeat_message(3, 311, [("ats", 171), ("linkedin-email", 140),
+                                      ("jsearch", 0)])
+    check("the heartbeat reports each source", "ats: 171" in body, body)
+    check("the heartbeat reports a zero-yield source", "jsearch: 0" in body, body)
+    check("the heartbeat says when to expect the next check",
+          "Next checks" in body, body)
+
+    body = heartbeat_message(3, 0, [("ats", None)])
+    check("a source that threw is named unreachable, not 0",
+          "ats: unreachable" in body, body)
+    check("a heartbeat with no sources does not crash",
+          "none configured" in heartbeat_message(3, 0, []))
 
 
 if __name__ == "__main__":

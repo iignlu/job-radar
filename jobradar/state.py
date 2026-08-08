@@ -32,6 +32,12 @@ class SeenStore:
         # exactly what happened: four consecutive runs aborted before sending.
         self.chat_id: str = ""
 
+        # Consecutive runs that delivered nothing. Silence is the bot's normal
+        # output on a quiet day AND its output when it is broken, which is why
+        # two outages in a row were noticed by a human rather than by the
+        # system. Counting silence lets cli.py break it deliberately.
+        self.silent_runs: int = 0
+
         # first_run drives the "do not spam on day one" branch in cli.py.
         # A corrupt file counts as a first run: we cannot tell what was already
         # sent, and re-arming quietly beats firing fifty notifications.
@@ -53,6 +59,10 @@ class SeenStore:
         self.keys = [str(k) for k in keys]
         self._index = set(self.keys)
         self.chat_id = str(payload.get("chat_id") or "")
+        try:
+            self.silent_runs = max(0, int(payload.get("silent_runs") or 0))
+        except (TypeError, ValueError):
+            self.silent_runs = 0
         self.first_run = False
         _log.info("loaded %d seen key(s) from %s", len(self.keys), self.path)
 
@@ -91,6 +101,7 @@ class SeenStore:
             # Not a credential: the chat id is useless without the bot token,
             # which stays in Actions secrets and never lands in the repo.
             "chat_id": self.chat_id,
+            "silent_runs": self.silent_runs,
             "keys": self.keys,
         }
         self.path.parent.mkdir(parents=True, exist_ok=True)

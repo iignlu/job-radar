@@ -6,6 +6,7 @@ and the overflow deferral.
 """
 
 import argparse
+import html as _html
 
 from . import config, log
 from .filters import Verdict, evaluate
@@ -145,6 +146,51 @@ def chat_id_for_run(configured: str, store, token: str, dry_run: bool = False,
     if chat_id:
         store.chat_id = chat_id
     return chat_id
+
+
+def record_silence(store, delivered: bool) -> int:
+    """Update the silent-run counter; return the count when it is time to speak.
+
+    Returns 0 when the bot should stay quiet, otherwise the number of
+    consecutive silent runs that have just elapsed. Resets the counter when it
+    fires, so a long outage produces a periodic note rather than one message
+    per run for the rest of time.
+    """
+    if delivered:
+        store.silent_runs = 0
+        return 0
+
+    store.silent_runs += 1
+    if store.silent_runs < config.HEARTBEAT_AFTER_SILENT_RUNS:
+        return 0
+
+    elapsed = store.silent_runs
+    store.silent_runs = 0
+    return elapsed
+
+
+def heartbeat_message(silent_runs: int, examined: int, yields) -> str:
+    """The "still alive, nothing to send" note.
+
+    Names what was checked, so that "nothing matched your filters" is visibly
+    different from "nothing worked" — the distinction the receiving end could
+    not previously make, and the reason two outages were caught by a person
+    rather than by the system.
+    """
+    checked = ", ".join(
+        f"{name}: {'unreachable' if count is None else count}"
+        for name, count in yields
+    ) or "none configured"
+
+    return (
+        "🟢 <b>Still watching — nothing new to send</b>\n\n"
+        f"No new match in the last {silent_runs} check(s). "
+        f"The most recent one looked at {examined} posting(s).\n\n"
+        f"Sources — {_html.escape(checked)}\n\n"
+        f"Next checks: {_html.escape(config.SCHEDULE_HUMAN)}.\n\n"
+        "This note only appears when the bot has been quiet, so silence "
+        "never has to mean guessing whether it broke."
+    )
 
 
 def _sort_key(pair):
@@ -410,6 +456,18 @@ def main(argv=None) -> int:
     # Everything we examined gets marked seen EXCEPT the deferred overflow.
     store.add_all(job.key for job, _ in to_send)
     store.add_all(job.key for job, _ in rejected)
+
+    # ---- heartbeat -------------------------------------------------------
+    # A run that sends nothing is indistinguishable, from the receiving end,
+    # from a run that never happened or one that died before sending. Both
+    # outages so far were reported by a human noticing the quiet. So: count
+    # consecutive silent runs, and after a day of them, break the silence on
+    # purpose. The message doubles as a health report — it names what was
+    # checked, so "nothing matched" is visibly different from "nothing worked".
+    silent_for = record_silence(store, delivered=bool(to_send or deferred))
+    if silent_for:
+        telegram.send_raw(heartbeat_message(silent_for, len(jobs), yields))
+        _log.info("sent heartbeat after %d silent run(s)", silent_for)
 
     if args.dry_run:
         _log.info("dry run — state not written, nothing sent")
