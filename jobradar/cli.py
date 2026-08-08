@@ -96,15 +96,18 @@ def build_sources(args) -> list:
     if linkedin:
         sources.append(linkedin)
 
-    sources.append(
-        JSearchSource(
-            api_key=config.env("RAPIDAPI_KEY"),
-            queries=config.QUERIES,
-            country=config.COUNTRY,
-            date_posted=args.date_posted or config.DATE_POSTED,
-            job_requirements=config.JOB_REQUIREMENTS,
+    if config.ENABLE_JSEARCH:
+        sources.append(
+            JSearchSource(
+                api_key=config.env("RAPIDAPI_KEY"),
+                queries=config.QUERIES,
+                country=config.COUNTRY,
+                date_posted=args.date_posted or config.DATE_POSTED,
+                job_requirements=config.JOB_REQUIREMENTS,
+            )
         )
-    )
+    else:
+        _log.info("jsearch disabled in config — running on the free sources only")
     return sources
 
 
@@ -300,14 +303,36 @@ def main(argv=None) -> int:
     # ---- fetch -----------------------------------------------------------
     fetched = []
     budget = 0
+    yields: list[tuple[str, int | None]] = []
     for source in sources:
         budget += source.request_cost
         try:
-            fetched.extend(source.fetch())
+            postings = source.fetch()
         except Exception as exc:
             _log.error("source %s failed entirely: %s", source.name, exc)
+            yields.append((source.name, None))
+            continue
+        fetched.extend(postings)
+        yields.append((source.name, len(postings)))
 
+    # Per-source accounting on one line. Without it the run log reports a
+    # single total, and a source that quietly stops contributing is invisible
+    # for as long as the others cover for it — which is how a dead JSearch
+    # went unnoticed while ATS and LinkedIn supplied 300 postings a run.
+    _log.info(
+        "source yield: %s",
+        ", ".join(
+            f"{name}={'FAILED' if count is None else count}"
+            for name, count in yields
+        ),
+    )
     _log.info("fetched %d posting(s) using ~%d API request(s)", len(fetched), budget)
+
+    if not fetched:
+        _log.error(
+            "every source returned nothing. That is not a quiet week — check "
+            "the per-source line above and run --doctor."
+        )
 
     # ---- dedup -----------------------------------------------------------
     # Two queries overlap heavily; the same posting also gets syndicated to

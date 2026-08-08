@@ -84,6 +84,14 @@ ATS_BOARDS = [
 
 ENABLE_ATS = True
 
+# JSearch is the only metered source and the only one that has ever gone
+# quiet on us. Set this to False to run on the free sources alone — the ATS
+# boards and your LinkedIn alerts supply ~300 postings a run between them and
+# produce every alert you currently receive, so switching it off costs less
+# than it sounds like. Left on by default: when JSearch works it reaches
+# postings the other two never see.
+ENABLE_JSEARCH = True
+
 # --------------------------------------------------------------------------
 # LinkedIn, via your own job-alert emails
 # --------------------------------------------------------------------------
