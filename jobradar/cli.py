@@ -63,6 +63,10 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="print your Telegram chat id (from getUpdates) and exit",
     )
     parser.add_argument(
+        "--say", metavar="TEXT", default=None,
+        help="send one message to TELEGRAM_CHAT_ID and exit (Telegram HTML allowed)",
+    )
+    parser.add_argument(
         "--check-chat", metavar="CHAT_ID", default=None,
         help="verify the bot can post to a chat/channel (e.g. @mychannel), then exit",
     )
@@ -305,6 +309,33 @@ def main(argv=None) -> int:
         for job in found[:15]:
             print(f"  {job.native_id}  {job.title}")
         return 0
+
+    if args.say:
+        # One-off message to the audience: a welcome post when a new channel
+        # goes live, or an end-to-end proof that delivery works on a day when
+        # no job happens to match. Uses the same destination and signature as
+        # a real alert, so a successful --say proves the real path.
+        try:
+            token = config.env("TELEGRAM_TOKEN")
+        except config.MissingSetting as exc:
+            _log.error("%s", exc)
+            return 2
+
+        store = SeenStore(config.STATE_PATH, max_keys=config.MAX_SEEN_KEYS)
+        try:
+            chat_id = chat_id_for_run(
+                config.env("TELEGRAM_CHAT_ID", required=False), store, token,
+                dry_run=args.dry_run,
+            )
+        except ChatIdUnavailable as exc:
+            _log.error("%s", exc)
+            return 2
+
+        if Telegram(token, chat_id, dry_run=args.dry_run).send_raw(args.say):
+            _log.info("sent to %s", chat_id)
+            return 0
+        _log.error("could not send to %s — run --check-chat %s", chat_id, chat_id)
+        return 1
 
     if args.check_chat:
         try:
