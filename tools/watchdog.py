@@ -56,13 +56,16 @@ def last_updated(path: Path) -> datetime | None:
 
 
 def chat_id() -> str:
-    """The secret if set, else the id cached in the state file.
+    """Where to raise the alarm: admin chat, then main chat, then the cache.
 
-    Same order the bot itself uses. The fallback matters: an expired chat id
-    was the original outage, and an alarm that shares that failure mode is
-    not an alarm.
+    Admin first, because "the bot has gone quiet" is a message for whoever
+    maintains it, not for a channel full of friends waiting on job alerts.
+
+    The cached fallback matters: an expired chat id was the original outage,
+    and an alarm that shares that failure mode is not an alarm.
     """
-    configured = config.env("TELEGRAM_CHAT_ID", required=False)
+    configured = (config.env("TELEGRAM_ADMIN_CHAT_ID", required=False)
+                  or config.env("TELEGRAM_CHAT_ID", required=False))
     if configured:
         return configured
     try:

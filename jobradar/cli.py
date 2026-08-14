@@ -344,7 +344,14 @@ def main(argv=None) -> int:
         _log.error("%s", exc)
         return 2
 
-    telegram = Telegram(token, chat_id, dry_run=args.dry_run)
+    # TELEGRAM_ADMIN_CHAT_ID is optional and only matters once TELEGRAM_CHAT_ID
+    # points at a shared channel: it keeps operational noise going to the
+    # person who maintains the bot rather than to everyone subscribed.
+    telegram = Telegram(
+        token, chat_id,
+        admin_chat_id=config.env("TELEGRAM_ADMIN_CHAT_ID", required=False),
+        dry_run=args.dry_run,
+    )
 
     # ---- fetch -----------------------------------------------------------
     fetched = []
@@ -398,7 +405,7 @@ def main(argv=None) -> int:
     if store.first_run:
         matched = sum(1 for job in jobs if evaluate(job).accepted)
         store.add_all(job.key for job in jobs)
-        telegram.send_raw(
+        telegram.send_admin(
             "👋 <b>job-radar is armed</b>\n"
             f"Marked {len(jobs)} existing posting(s) as seen, "
             f"{matched} of which matched your filters.\n"
@@ -466,7 +473,7 @@ def main(argv=None) -> int:
     # checked, so "nothing matched" is visibly different from "nothing worked".
     silent_for = record_silence(store, delivered=bool(to_send or deferred))
     if silent_for:
-        telegram.send_raw(heartbeat_message(silent_for, len(jobs), yields))
+        telegram.send_admin(heartbeat_message(silent_for, len(jobs), yields))
         _log.info("sent heartbeat after %d silent run(s)", silent_for)
 
     if args.dry_run:

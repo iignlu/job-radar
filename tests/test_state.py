@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from jobradar import config  # noqa: E402
 from jobradar.cli import chat_id_for_run, heartbeat_message, record_silence  # noqa: E402
+from jobradar.notify import ChatIdUnavailable, Telegram  # noqa: E402
 from jobradar.state import SeenStore  # noqa: E402
 
 _results: list[tuple[bool, str, str]] = []
@@ -192,6 +193,72 @@ with tempfile.TemporaryDirectory() as _tmp:
           "ats: unreachable" in body, body)
     check("a heartbeat with no sources does not crash",
           "none configured" in heartbeat_message(3, 0, []))
+
+    # 11 — sharing the bot's link means strangers now appear in getUpdates.
+    # Picking one of them would deliver a stranger your job alerts, so the
+    # resolver must refuse to guess rather than choose.
+    def updates(*chat_ids):
+        return {"result": [{"message": {"chat": {"id": cid}}} for cid in chat_ids]}
+
+    def resolve(payload):
+        from jobradar import http
+        from jobradar import notify
+        original = http.get_json
+        http.get_json = lambda *a, **k: payload
+        try:
+            return notify.resolve_chat_id("tok")
+        finally:
+            http.get_json = original
+
+    check("a single chat still resolves", resolve(updates(820654816)) == "820654816")
+    check("the same chat repeated is still one chat",
+          resolve(updates(820654816, 820654816)) == "820654816")
+
+    try:
+        resolve(updates(820654816, 999111222))
+        check("two different chats must not resolve silently", False,
+              "it returned a chat id instead of refusing")
+    except ChatIdUnavailable as exc:
+        check("two different chats refuse rather than guess", True)
+        check("the refusal names both chats so you can pick",
+              "820654816" in str(exc) and "999111222" in str(exc), str(exc))
+
+    try:
+        resolve({"result": [{"edited_message": {}}]})
+        check("updates with no chat id raise", False, "no exception")
+    except ChatIdUnavailable:
+        check("updates with no chat id raise", True)
+
+    # 12 — operational messages must not land in a shared channel
+    sends = []
+
+    class FakeHttp:
+        @staticmethod
+        def post_json(url, payload, **kwargs):
+            sends.append(payload["chat_id"])
+            return {}
+
+    from jobradar import http as _http
+    from jobradar import notify as _notify
+    _original_post = _http.post_json
+    _http.post_json = FakeHttp.post_json
+    try:
+        bot = Telegram("tok", chat_id="@friends_channel",
+                       admin_chat_id="820654816", pause=0)
+        bot.send_raw("a job")
+        bot.send_admin("a failure")
+        check("job alerts go to the shared channel", sends[0] == "@friends_channel",
+              str(sends))
+        check("operational messages go to the admin instead",
+              sends[1] == "820654816", str(sends))
+
+        sends.clear()
+        solo = Telegram("tok", chat_id="820654816", pause=0)
+        solo.send_admin("a failure")
+        check("with no admin set, operational messages fall back to the main chat",
+              sends == ["820654816"], str(sends))
+    finally:
+        _http.post_json = _original_post
 
 
 if __name__ == "__main__":
