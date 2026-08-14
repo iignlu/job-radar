@@ -88,6 +88,68 @@ def resolve_chat_id(token: str) -> str:
     return found[0]
 
 
+def check_chat(token: str, chat_id: str) -> list[str]:
+    """Report whether the bot can actually post to `chat_id`.
+
+    Exists because a misconfigured destination fails *quietly*: sendMessage
+    raises, the error is logged, the run still succeeds, and the result is a
+    silent evening indistinguishable from a slow week. Better to answer
+    "can you post here?" before pointing the live secret at somewhere new.
+
+    Read-only — it posts nothing. Returns human-readable findings.
+    """
+    findings = []
+
+    try:
+        bot = describe_bot(token)
+        bot_id = bot.get("id")
+        findings.append(f"OK    token valid — bot is @{bot.get('username', '?')}")
+    except http.HttpError as exc:
+        return [f"FAIL  token rejected by Telegram: {exc}"]
+
+    try:
+        chat = (http.get_json(
+            API_ROOT.format(token=token, method="getChat"),
+            params={"chat_id": chat_id},
+        ).get("result") or {})
+    except http.HttpError as exc:
+        findings.append(f"FAIL  cannot see {chat_id}: {exc}")
+        findings.append("      Check the name is exact, and that the channel is "
+                        "public (a private one needs its numeric -100... id).")
+        return findings
+
+    kind = chat.get("type", "?")
+    findings.append(
+        f"OK    found {kind} {chat.get('title') or chat.get('username') or chat_id!r} "
+        f"(numeric id {chat.get('id')})"
+    )
+
+    # Being able to see a public channel proves nothing about posting to it —
+    # that needs administrator rights, and this is the step people miss.
+    try:
+        member = (http.get_json(
+            API_ROOT.format(token=token, method="getChatMember"),
+            params={"chat_id": chat_id, "user_id": bot_id},
+        ).get("result") or {})
+    except http.HttpError as exc:
+        findings.append(f"FAIL  cannot read the bot's membership: {exc}")
+        return findings
+
+    status = member.get("status")
+    if status == "administrator" and member.get("can_post_messages"):
+        findings.append("OK    bot is an administrator and can post messages")
+    elif status == "administrator":
+        findings.append("FAIL  bot is an administrator but lacks 'Post Messages' — "
+                        "enable that permission")
+    elif kind == "private":
+        findings.append("OK    private chat — no admin rights needed")
+    else:
+        findings.append(f"FAIL  bot's status here is '{status}', not administrator. "
+                        "Add it as an admin with 'Post Messages'.")
+
+    return findings
+
+
 def humanise_age(iso: str | None) -> str:
     """'3h ago' from an ISO timestamp; 'recently' when we cannot tell."""
     if not iso:
