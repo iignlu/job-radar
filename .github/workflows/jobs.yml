@@ -39,6 +39,10 @@ on:
         description: "Verify the bot can post to this chat/channel, e.g. @mychannel (diagnostic)"
         type: string
         default: ""
+      say:
+        description: "Post one message to the chat instead of running (Telegram HTML allowed)"
+        type: string
+        default: ""
       probe_jsearch:
         description: "Test JSearch parameters one at a time (diagnostic, ~5 requests)"
         type: boolean
@@ -83,8 +87,19 @@ jobs:
           DUMP_LINKEDIN: ${{ inputs.dump_linkedin }}
           PROBE_JSEARCH: ${{ inputs.probe_jsearch }}
           CHECK_CHAT: ${{ inputs.check_chat }}
+          SAY: ${{ inputs.say }}
         run: |
           set -euo pipefail
+
+          # --say takes free text, so it gets its own invocation with the value
+          # quoted. The $args path below is deliberately unquoted for word
+          # splitting, which would shred a message into one argument per word.
+          if [ -n "${SAY:-}" ]; then
+            echo "running: python -m jobradar --say <message>"
+            python -m jobradar --say "$SAY"
+            exit $?
+          fi
+
           args=""
           [ "${DUMP_LINKEDIN:-}" = "true" ] && args="--dump-linkedin"
           [ "${PROBE_JSEARCH:-}" = "true" ] && args="--probe-jsearch"
@@ -110,7 +125,7 @@ jobs:
       # its job, not suffering an outage, and "run FAILED — no jobs were sent"
       # is actively misleading when nothing was meant to be sent.
       - name: Report failure to Telegram
-        if: failure() && inputs.check_chat == '' && inputs.probe_jsearch != true && inputs.dump_linkedin != true
+        if: failure() && inputs.check_chat == '' && inputs.say == '' && inputs.probe_jsearch != true && inputs.dump_linkedin != true
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
