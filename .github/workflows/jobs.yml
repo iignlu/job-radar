@@ -35,6 +35,10 @@ on:
         description: "Inspect LinkedIn alert emails instead of running (diagnostic)"
         type: boolean
         default: false
+      check_chat:
+        description: "Verify the bot can post to this chat/channel, e.g. @mychannel (diagnostic)"
+        type: string
+        default: ""
       probe_jsearch:
         description: "Test JSearch parameters one at a time (diagnostic, ~5 requests)"
         type: boolean
@@ -78,11 +82,13 @@ jobs:
           LIMIT: ${{ inputs.limit }}
           DUMP_LINKEDIN: ${{ inputs.dump_linkedin }}
           PROBE_JSEARCH: ${{ inputs.probe_jsearch }}
+          CHECK_CHAT: ${{ inputs.check_chat }}
         run: |
           set -euo pipefail
           args=""
           [ "${DUMP_LINKEDIN:-}" = "true" ] && args="--dump-linkedin"
           [ "${PROBE_JSEARCH:-}" = "true" ] && args="--probe-jsearch"
+          [ -n "${CHECK_CHAT:-}" ] && args="--check-chat $CHECK_CHAT"
           if [ -z "$args" ]; then
             [ -n "${DATE_POSTED:-}" ] && args="$args --date-posted $DATE_POSTED"
             [ -n "${LIMIT:-}" ] && args="$args --limit $LIMIT"
