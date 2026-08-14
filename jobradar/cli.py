@@ -10,7 +10,9 @@ import html as _html
 
 from . import config, log
 from .filters import Verdict, evaluate
-from .notify import ChatIdUnavailable, Telegram, describe_bot, resolve_chat_id
+from .notify import (
+    ChatIdUnavailable, Telegram, check_chat, describe_bot, resolve_chat_id,
+)
 from .sources.ats import ATSSource
 from .sources.demo import DemoSource
 from .sources.linkedin_email import from_config as linkedin_from_config
@@ -59,6 +61,10 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument(
         "--resolve-chat-id", action="store_true",
         help="print your Telegram chat id (from getUpdates) and exit",
+    )
+    parser.add_argument(
+        "--check-chat", metavar="CHAT_ID", default=None,
+        help="verify the bot can post to a chat/channel (e.g. @mychannel), then exit",
     )
     parser.add_argument(
         "--probe-jsearch", action="store_true",
@@ -300,6 +306,20 @@ def main(argv=None) -> int:
             print(f"  {job.native_id}  {job.title}")
         return 0
 
+    if args.check_chat:
+        try:
+            findings = check_chat(config.env("TELEGRAM_TOKEN"), args.check_chat)
+        except config.MissingSetting as exc:
+            _log.error("%s", exc)
+            return 2
+        for line in findings:
+            print(line)
+        failed = [f for f in findings if f.startswith("FAIL")]
+        print()
+        print("cannot post there yet" if failed
+              else f"ready — set TELEGRAM_CHAT_ID to {args.check_chat}")
+        return 1 if failed else 0
+
     if args.probe_jsearch:
         try:
             JSearchSource(
@@ -450,8 +470,27 @@ def main(argv=None) -> int:
     to_send = matches[:limit]
     deferred = matches[limit:]
 
-    for job, verdict in to_send:
-        telegram.send_job(job, verdict.reason)
+    # A failed send is logged and swallowed, so a wrong chat id — a channel the
+    # bot was never made an admin of, say — produced a green run that delivered
+    # nothing: the silent-failure shape this project keeps meeting. Track which
+    # ones actually landed, because only those may be marked seen.
+    attempted, to_send = to_send, []
+    undelivered = 0
+    for job, verdict in attempted:
+        if telegram.send_job(job, verdict.reason):
+            to_send.append((job, verdict))
+        else:
+            undelivered += 1
+
+    if undelivered:
+        # Not marked seen, so they are retried on the next run rather than
+        # lost, and the error fails the run so the workflow's alert fires.
+        _log.error(
+            "%d of %d message(s) could not be delivered to %s. They stay unseen "
+            "and will be retried. Check the chat id is right and that the bot "
+            "may post there: python -m jobradar --check-chat %s",
+            undelivered, len(attempted), telegram.chat_id, telegram.chat_id,
+        )
 
     if deferred:
         telegram.send_raw(
@@ -482,4 +521,7 @@ def main(argv=None) -> int:
         store.save()
 
     _log.info("done: %d message(s) delivered", telegram.sent)
-    return 0
+    # Non-zero on undelivered matches so the run goes red and the workflow's
+    # failure step reports it. State is saved first: the successful sends are
+    # recorded, the failed ones stay unseen for the next run.
+    return 1 if undelivered else 0
