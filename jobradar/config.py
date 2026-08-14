@@ -29,9 +29,24 @@ COUNTRY = "sa"
 # change this one string.
 JSEARCH_ENDPOINT = "search-v2"
 
-# One of: all | today | 3days | week | month. `today` suits a 3×/day schedule —
-# anything wider re-fetches the same postings we already marked seen.
-DATE_POSTED = "today"
+# One of: all | today | 3days | week | month.
+#
+# This was "today", on the reasoning that a 3×/day schedule does not need a
+# wider window and anything wider just re-fetches postings already marked seen.
+# The reasoning was sound and the result was that JSearch returned nothing at
+# all, for weeks. Measured on 14 August with --probe-jsearch, same key, same
+# query, one parameter changed:
+#
+#     date_posted=today ->  0 postings
+#     date_posted=week  ->  4 postings   e.g. "Associate Consultant (Fresh Grad role)"
+#     date_posted=all   -> 10 postings   e.g. "Graduate Development Program Engineer"
+#
+# So "today" is not a narrower window on this endpoint, it is an empty one.
+# "week" is the right setting anyway: MAX_AGE_DAYS already caps freshness at
+# 14 days locally and seen.json dedups, so a wider server-side window costs no
+# extra requests and re-fetching a known posting is free — while missing one
+# is not.
+DATE_POSTED = "week"
 
 # JSearch-side pre-filter, e.g. "under_3_years_experience,no_experience".
 #
