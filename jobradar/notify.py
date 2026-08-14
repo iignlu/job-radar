@@ -57,20 +57,35 @@ def resolve_chat_id(token: str) -> str:
             "your bot any message (e.g. 'hi'), then run this again."
         )
 
-    # result[0] first, as documented, but fall back to scanning every update:
-    # a /start arrives as my_chat_member rather than message, and that would
-    # otherwise look like a failure.
+    # Scan every update rather than trusting result[0]: a /start arrives as
+    # my_chat_member rather than message, and that would otherwise look like
+    # a failure.
+    found: list[str] = []
     for update in results:
         for field in ("message", "edited_message", "channel_post", "my_chat_member"):
             container = update.get(field) or {}
             chat_id = (container.get("chat") or {}).get("id")
-            if chat_id is not None:
-                return str(chat_id)
+            if chat_id is not None and str(chat_id) not in found:
+                found.append(str(chat_id))
 
-    raise ChatIdUnavailable(
-        f"got {len(results)} update(s) but none carried a chat id. "
-        "Send your bot a plain text message and retry."
-    )
+    if not found:
+        raise ChatIdUnavailable(
+            f"got {len(results)} update(s) but none carried a chat id. "
+            "Send your bot a plain text message and retry."
+        )
+
+    # More than one chat means other people have messaged the bot — which now
+    # happens whenever its link is shared. Picking the first would silently
+    # deliver someone's job alerts to a stranger, so refuse and make the
+    # operator choose. Guessing is the one thing this must not do.
+    if len(found) > 1:
+        raise ChatIdUnavailable(
+            f"getUpdates shows {len(found)} different chats ({', '.join(found)}) "
+            "— the bot cannot tell which one is yours. Set TELEGRAM_CHAT_ID "
+            "explicitly to the one you want alerts delivered to."
+        )
+
+    return found[0]
 
 
 def humanise_age(iso: str | None) -> str:
@@ -225,27 +240,31 @@ def format_job(job, reason: str) -> str:
 class Telegram:
     """Sender. In dry-run mode it prints and never touches the network."""
 
-    def __init__(self, token: str, chat_id: str, dry_run: bool = False,
-                 pause: float = SEND_PAUSE_SECONDS):
+    def __init__(self, token: str, chat_id: str, admin_chat_id: str = "",
+                 dry_run: bool = False, pause: float = SEND_PAUSE_SECONDS):
         self.token = token
         self.chat_id = chat_id
+        # Where operational messages go. Once chat_id points at a channel of
+        # friends, "run FAILED" and "still watching" are noise to everyone but
+        # the person who maintains the bot — so they get their own destination,
+        # defaulting to the main one when nobody has split them out.
+        self.admin_chat_id = admin_chat_id or chat_id
         self.dry_run = dry_run
         self.pause = pause
         self.sent = 0
 
-    def send_raw(self, body: str) -> bool:
-        """Send one pre-formatted HTML message."""
+    def _send(self, body: str, target: str, label: str) -> bool:
         body = with_signature(body)
 
         if self.dry_run:
             # No pause here: dry runs are for reading output, not pacing it.
-            print("\n--- telegram (dry-run) " + "-" * 44)
+            print(f"\n--- telegram {label} (dry-run) " + "-" * 34)
             print(body)
             print("-" * 66)
             self.sent += 1
             return True
 
-        if not self.token or not self.chat_id:
+        if not self.token or not target:
             _log.error("cannot send: TELEGRAM_TOKEN or TELEGRAM_CHAT_ID missing")
             return False
 
@@ -253,19 +272,32 @@ class Telegram:
             http.post_json(
                 API_TEMPLATE.format(token=self.token),
                 {
-                    "chat_id": self.chat_id,
+                    "chat_id": target,
                     "text": body,
                     "parse_mode": "HTML",
                     "disable_web_page_preview": True,
                 },
             )
         except http.HttpError as exc:
-            _log.error("telegram send failed: %s", exc)
+            _log.error("telegram send to %s failed: %s", label, exc)
             return False
 
         self.sent += 1
         time.sleep(self.pause)
         return True
+
+    def send_raw(self, body: str) -> bool:
+        """Send one pre-formatted HTML message to the audience."""
+        return self._send(body, self.chat_id, "chat")
+
+    def send_admin(self, body: str) -> bool:
+        """Send an operational message to whoever runs the bot.
+
+        Separate from send_raw so that pointing chat_id at a shared channel
+        does not start broadcasting failure notices and heartbeats to everyone
+        subscribed to it.
+        """
+        return self._send(body, self.admin_chat_id, "admin")
 
     def send_job(self, job, reason: str) -> bool:
         return self.send_raw(format_job(job, reason))

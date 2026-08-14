@@ -95,18 +95,21 @@ jobs:
       # rather than Python, so a syntax error or a crashed interpreter cannot
       # take the alarm down with it.
       #
-      # Chat id comes from the secret, falling back to the one cached in
-      # seen.json, so the alarm still works in exactly the situation that
-      # caused the first outage.
+      # Goes to TELEGRAM_ADMIN_CHAT_ID when set, so that pointing
+      # TELEGRAM_CHAT_ID at a shared channel does not broadcast "run FAILED"
+      # to everyone subscribed to it. Falls back to the main chat id, then to
+      # the one cached in seen.json, so the alarm still works in exactly the
+      # situation that caused the first outage.
       - name: Report failure to Telegram
         if: failure()
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set +e
-          CHAT="${TELEGRAM_CHAT_ID:-}"
+          CHAT="${TELEGRAM_ADMIN_CHAT_ID:-${TELEGRAM_CHAT_ID:-}}"
           if [ -z "$CHAT" ] && [ -f seen.json ]; then
             CHAT=$(python -c "import json;print(json.load(open('seen.json')).get('chat_id',''))" 2>/dev/null)
           fi
