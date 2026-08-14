@@ -229,7 +229,51 @@ with tempfile.TemporaryDirectory() as _tmp:
     except ChatIdUnavailable:
         check("updates with no chat id raise", True)
 
-    # 12 — operational messages must not land in a shared channel
+    # 12 — "can the bot post here?" depends on the kind of chat. Requiring
+    # can_post_messages everywhere failed a supergroup that worked perfectly:
+    # the API documents that field as channels-only, so it is simply absent
+    # in a group and the check invented a problem that was not there.
+    def can_post(kind, member):
+        from jobradar import http, notify
+        original = http.get_json
+        calls = {"n": 0}
+
+        def fake(url, **kwargs):
+            calls["n"] += 1
+            if "getMe" in url:
+                return {"result": {"id": 1, "username": "bot"}}
+            if "getChatMember" in url:
+                return {"result": member}
+            return {"result": {"id": -100, "title": "T", "type": kind}}
+
+        http.get_json = fake
+        try:
+            return notify.check_chat("tok", "@x")
+        finally:
+            http.get_json = original
+
+    def verdict(kind, member):
+        return [f for f in can_post(kind, member) if f.startswith("FAIL")]
+
+    check("a supergroup admin passes without can_post_messages",
+          not verdict("supergroup", {"status": "administrator"}),
+          str(can_post("supergroup", {"status": "administrator"})))
+    check("an ordinary supergroup member passes too",
+          not verdict("supergroup", {"status": "member"}))
+    check("a group member passes", not verdict("group", {"status": "member"}))
+    check("a channel admin WITH post rights passes",
+          not verdict("channel", {"status": "administrator",
+                                  "can_post_messages": True}))
+    check("a channel admin WITHOUT post rights fails",
+          verdict("channel", {"status": "administrator"}))
+    check("a channel non-admin fails",
+          verdict("channel", {"status": "member"}))
+    check("a bot removed from the chat fails",
+          verdict("supergroup", {"status": "kicked"}))
+    check("a private chat needs no permissions",
+          not verdict("private", {"status": "member"}))
+
+    # 13 — operational messages must not land in a shared channel
     sends = []
 
     class FakeHttp:

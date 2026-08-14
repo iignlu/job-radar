@@ -106,8 +106,11 @@ jobs:
       # to everyone subscribed to it. Falls back to the main chat id, then to
       # the one cached in seen.json, so the alarm still works in exactly the
       # situation that caused the first outage.
+      # Only for real alert runs. A diagnostic that reports a problem is doing
+      # its job, not suffering an outage, and "run FAILED — no jobs were sent"
+      # is actively misleading when nothing was meant to be sent.
       - name: Report failure to Telegram
-        if: failure()
+        if: failure() && inputs.check_chat == '' && inputs.probe_jsearch != true && inputs.dump_linkedin != true
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
