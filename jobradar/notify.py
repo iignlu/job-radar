@@ -136,16 +136,33 @@ def check_chat(token: str, chat_id: str) -> list[str]:
         return findings
 
     status = member.get("status")
-    if status == "administrator" and member.get("can_post_messages"):
-        findings.append("OK    bot is an administrator and can post messages")
-    elif status == "administrator":
-        findings.append("FAIL  bot is an administrator but lacks 'Post Messages' — "
-                        "enable that permission")
+
+    # What counts as "can post" depends on the kind of chat, and conflating
+    # them produces a confident wrong answer:
+    #
+    #   channel          broadcast-only; posting needs admin + can_post_messages
+    #   group/supergroup any member may post; can_post_messages is not set here
+    #                    at all (the API documents it as channels-only), so
+    #                    requiring it fails a chat that works perfectly
+    #   private          a direct chat with you; nothing to grant
+    if status in ("left", "kicked"):
+        findings.append(f"FAIL  bot is not in this {kind} (status '{status}') — "
+                        "add it first")
     elif kind == "private":
-        findings.append("OK    private chat — no admin rights needed")
+        findings.append("OK    private chat — no permissions needed")
+    elif kind == "channel":
+        if status != "administrator":
+            findings.append(f"FAIL  bot's status is '{status}', not administrator. "
+                            "A channel only accepts posts from admins.")
+        elif not member.get("can_post_messages"):
+            findings.append("FAIL  bot is an administrator but lacks 'Post "
+                            "Messages' — enable that permission")
+        else:
+            findings.append("OK    bot is an administrator and can post messages")
     else:
-        findings.append(f"FAIL  bot's status here is '{status}', not administrator. "
-                        "Add it as an admin with 'Post Messages'.")
+        # Group or supergroup. Admin is not required; being present is enough
+        # unless the group restricts sending for everyone.
+        findings.append(f"OK    bot is a '{status}' of this {kind} and may post")
 
     return findings
 
