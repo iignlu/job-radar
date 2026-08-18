@@ -1,8 +1,8 @@
 {
-  "updated": "2026-08-17T16:25:28+00:00",
-  "count": 472,
+  "updated": "2026-08-18T06:39:40+00:00",
+  "count": 479,
   "chat_id": "@A_jobradar",
-  "silent_runs": 1,
+  "silent_runs": 0,
   "keys": [
     "jsearch:K_hhtM2tDToq4iEiAAAAAA==",
     "jsearch:RBa7oJ_YUE5VPcBSAAAAAA==",
@@ -475,6 +475,13 @@
     "ats:workable:foodics:902C025212",
     "ats:greenhouse:tamara:4953854101",
     "ats:workable:salla:4425580634",
-    "ats:workable:salla:2E93214C2E"
+    "ats:workable:salla:2E93214C2E",
+    "linkedin-email:4454252023",
+    "linkedin-email:4452267692",
+    "linkedin-email:4452248373",
+    "linkedin-email:4452241636",
+    "linkedin-email:4454249199",
+    "linkedin-email:4398113447",
+    "jsearch:GD4ZGAa8buiAFL7sAAAAAA=="
   ]
 }
