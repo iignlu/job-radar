@@ -1,8 +1,8 @@
 {
-  "updated": "2026-09-03T10:41:22+00:00",
-  "count": 726,
+  "updated": "2026-09-03T14:52:01+00:00",
+  "count": 727,
   "chat_id": "@A_jobradar",
-  "silent_runs": 0,
+  "silent_runs": 1,
   "keys": [
     "jsearch:K_hhtM2tDToq4iEiAAAAAA==",
     "jsearch:RBa7oJ_YUE5VPcBSAAAAAA==",
@@ -729,6 +729,7 @@
     "linkedin-email:4459980389",
     "linkedin-email:4462432232",
     "ats:greenhouse:tamara:4964015101",
-    "ats:recruitee:unifonic:2528364"
+    "ats:recruitee:unifonic:2528364",
+    "ats:recruitee:unifonic:2730300"
   ]
 }
