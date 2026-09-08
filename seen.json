@@ -1,6 +1,6 @@
 {
-  "updated": "2026-09-08T10:36:10+00:00",
-  "count": 783,
+  "updated": "2026-09-08T14:54:06+00:00",
+  "count": 784,
   "chat_id": "@A_jobradar",
   "silent_runs": 0,
   "keys": [
@@ -786,6 +786,7 @@
     "ats:greenhouse:tamara:4718707101",
     "ats:workable:foodics:764441A582",
     "linkedin-email:4462222143",
-    "jsearch:bing"
+    "jsearch:bing",
+    "linkedin-email:4451797162"
   ]
 }
