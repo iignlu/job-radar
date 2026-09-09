@@ -1,8 +1,8 @@
 {
-  "updated": "2026-09-09T15:05:02+00:00",
-  "count": 798,
+  "updated": "2026-09-09T19:04:50+00:00",
+  "count": 799,
   "chat_id": "@A_jobradar",
-  "silent_runs": 1,
+  "silent_runs": 2,
   "keys": [
     "jsearch:K_hhtM2tDToq4iEiAAAAAA==",
     "jsearch:RBa7oJ_YUE5VPcBSAAAAAA==",
@@ -801,6 +801,7 @@
     "ats:recruitee:unifonic:2693193",
     "linkedin-email:4462501323",
     "linkedin-email:4462520103",
-    "ats:ashby:leantech:f82276bf-e861-4908-9513-49381561ecf1"
+    "ats:ashby:leantech:f82276bf-e861-4908-9513-49381561ecf1",
+    "linkedin-email:4464475682"
   ]
 }
