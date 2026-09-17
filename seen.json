@@ -1,8 +1,8 @@
 {
-  "updated": "2026-09-17T11:01:11+00:00",
-  "count": 904,
+  "updated": "2026-09-17T15:31:20+00:00",
+  "count": 912,
   "chat_id": "@A_jobradar",
-  "silent_runs": 1,
+  "silent_runs": 0,
   "keys": [
     "jsearch:K_hhtM2tDToq4iEiAAAAAA==",
     "jsearch:RBa7oJ_YUE5VPcBSAAAAAA==",
@@ -907,6 +907,14 @@
     "linkedin-email:4465973924",
     "linkedin-email:4465973160",
     "ats:greenhouse:tamara:4977400101",
-    "ats:workable:bupa:364574B1B2"
+    "ats:workable:bupa:364574B1B2",
+    "linkedin-email:4468259321",
+    "linkedin-email:4468383673",
+    "linkedin-email:4468392542",
+    "linkedin-email:4468377948",
+    "linkedin-email:4467999029",
+    "linkedin-email:4468370108",
+    "linkedin-email:4468298144",
+    "ats:ashby:leantech:18f875d1-261f-4a98-b2bb-810f65294d53"
   ]
 }
