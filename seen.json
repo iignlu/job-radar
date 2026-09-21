@@ -1,8 +1,8 @@
 {
-  "updated": "2026-09-20T18:29:01+00:00",
-  "count": 949,
+  "updated": "2026-09-21T12:01:22+00:00",
+  "count": 952,
   "chat_id": "@A_jobradar",
-  "silent_runs": 0,
+  "silent_runs": 1,
   "keys": [
     "jsearch:K_hhtM2tDToq4iEiAAAAAA==",
     "jsearch:RBa7oJ_YUE5VPcBSAAAAAA==",
@@ -952,6 +952,9 @@
     "ats:greenhouse:tamara:4949276101",
     "linkedin-email:4467325386",
     "linkedin-email:4468457316",
-    "linkedin-email:4467310998"
+    "linkedin-email:4467310998",
+    "ats:greenhouse:tamara:4979581101",
+    "ats:workable:foodics:8B8A457674",
+    "ats:workable:foodics:9FCD19D689"
   ]
 }
