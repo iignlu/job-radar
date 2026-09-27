@@ -154,6 +154,7 @@ check(
 # different suffix. Before the fix they produced different keys and the job was
 # alerted twice.
 from jobradar.sources.jsearch import JSearchSource  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 import base64  # noqa: E402
 
@@ -272,7 +273,14 @@ _gh = _ats._to_job("Tamara", "greenhouse", "tamara", _gh_map, {
     "id": 4567, "title": "Graduate Software Engineer",
     "absolute_url": "https://boards.greenhouse.io/tamara/jobs/4567",
     "content": "<p>Join our <b>graduate</b> programme. Python and SQL.</p>",
-    "location": {"name": "Riyadh"}, "updated_at": "2026-08-01T10:00:00Z",
+    "location": {"name": "Riyadh"},
+    # Relative, not a fixed date. This was "2026-08-01T10:00:00Z", which sailed
+    # through in August and then started failing the freshness layer as the
+    # calendar moved past MAX_AGE_DAYS — a test that rots on a timer tells you
+    # nothing about the code. Two days old is fresh under any sane setting.
+    "updated_at": (
+        datetime.now(timezone.utc) - timedelta(days=2)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ"),
 })
 check("greenhouse posting maps to a Job", _gh.title == "Graduate Software Engineer", _gh.title)
 check("ATS link is marked direct", _gh.direct_url == _gh.url and _gh.best_url == _gh.url,

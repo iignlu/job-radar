@@ -11,10 +11,29 @@ name: job-alerts
 
 on:
   schedule:
-    # 06:00, 11:00 and 16:00 UTC, Sunday–Thursday.
-    # Saudi Arabia is UTC+3 -> 09:00, 14:00 and 19:00 local, on the Saudi
-    # working week. GitHub cron is always UTC and has no timezone option.
-    - cron: "0 6,11,16 * * 0-4"
+    # 03:23, 06:23 and 09:23 UTC, Sunday–Thursday. Saudi Arabia is UTC+3, so
+    # 06:23, 09:23 and 12:23 local. GitHub cron is always UTC, no timezone.
+    #
+    # Two things shape these numbers, and neither is obvious:
+    #
+    # 1. GitHub runs free scheduled workflows LATE. Measured over the week of
+    #    21-24 September: every run fired 3-5 hours after its slot. The old
+    #    16:00 UTC run was landing at 19:30-20:00 UTC, i.e. 22:30 Riyadh --
+    #    alerts arriving when nobody can act on them, and a whole night's head
+    #    start lost against other applicants. So the schedule is set EARLY on
+    #    purpose: the aim is that even a 5-hour delay lands inside Saudi
+    #    working hours (worst case 11:23, 14:23, 17:23 local). Early is
+    #    harmless -- a notification waits -- while late is the whole problem.
+    #
+    # 2. Minute 0 is the most contended minute of the hour, which is most of
+    #    why the delay is that large. An off-the-hour minute queues behind far
+    #    less. Hence :23 rather than :00.
+    #
+    # Still spaced 3 hours apart rather than clustered into one morning hour:
+    # runs that close together would find nothing new after the first, which
+    # both wastes JSearch quota and trips the silent-run heartbeat in
+    # config.py into firing on a perfectly healthy day.
+    - cron: "23 3,6,9 * * 0-4"
 
   # Manual runs can widen the window without touching config. Useful on a
   # Friday/Saturday, when "today" is legitimately empty because the Saudi
