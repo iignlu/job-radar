@@ -18,10 +18,19 @@ _log = log.get(__name__)
 API_ROOT = "https://api.telegram.org/bot{token}/{method}"
 API_TEMPLATE = "https://api.telegram.org/bot{token}/sendMessage"
 
-# Telegram tolerates roughly one message per second to a single chat. 1.2s is
-# a deliberate margin — a run sends at most a dozen, so the extra seconds cost
-# nothing and a 429 mid-batch would cost the rest of the batch.
-SEND_PAUSE_SECONDS = 1.2
+# Telegram's binding limit here is not the per-second one — it is roughly
+# 20 messages per MINUTE to a single group, and the alerts go to a group.
+#
+# This used to be 1.2s, i.e. 50/minute, which was over that limit and got away
+# with it only because MAX_MESSAGES_PER_RUN was 12: a dozen messages never ran
+# long enough for the per-minute window to bite. Raising the cap removed that
+# accident, so the pace has to be honest. 3.2s is ~18.75/minute — under 20 with
+# margin for the retry backoff.
+#
+# The cost is nothing that matters: 40 messages take about two minutes of a
+# workflow run that is otherwise idle. A 429 mid-batch, by contrast, costs the
+# rest of the batch. Move this and MAX_MESSAGES_PER_RUN together.
+SEND_PAUSE_SECONDS = 3.2
 
 # Telegram hard-caps message bodies at 4096 characters.
 MAX_BODY = 4000

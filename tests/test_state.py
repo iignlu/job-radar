@@ -19,7 +19,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from jobradar import config  # noqa: E402
 from jobradar.cli import chat_id_for_run, heartbeat_message, record_silence  # noqa: E402
-from jobradar.notify import ChatIdUnavailable, Telegram  # noqa: E402
+from jobradar.notify import (  # noqa: E402
+    ChatIdUnavailable, SEND_PAUSE_SECONDS, Telegram,
+)
 from jobradar.state import SeenStore  # noqa: E402
 
 _results: list[tuple[bool, str, str]] = []
@@ -303,6 +305,34 @@ with tempfile.TemporaryDirectory() as _tmp:
               sends == ["820654816"], str(sends))
     finally:
         _http.post_json = _original_post
+
+
+# 14 — the send pace must respect Telegram's group limit, whatever the cap is.
+# Telegram allows roughly 20 messages per minute to a single group. The pause
+# and MAX_MESSAGES_PER_RUN are two halves of one decision: the old 1.2s pause
+# was 50/minute and only got away with it because the cap was 12, so a batch
+# never ran long enough for the per-minute window to bite. Raising the cap
+# without slowing the pace would have started losing the tail of every large
+# batch to 429s. This fails loudly if either value moves alone.
+TELEGRAM_GROUP_MESSAGES_PER_MINUTE = 20
+
+_rate = 60.0 / SEND_PAUSE_SECONDS
+check("the send pace stays under Telegram's per-group limit",
+      _rate <= TELEGRAM_GROUP_MESSAGES_PER_MINUTE,
+      f"{_rate:.1f}/min at {SEND_PAUSE_SECONDS}s pause, limit "
+      f"{TELEGRAM_GROUP_MESSAGES_PER_MINUTE}/min")
+
+# A full batch must also finish well inside a workflow run, or the cap is
+# theoretical: a job that times out mid-send loses the rest of the batch.
+_worst_case_minutes = (config.MAX_MESSAGES_PER_RUN * SEND_PAUSE_SECONDS) / 60
+check("a full batch finishes inside a few minutes",
+      _worst_case_minutes < 5,
+      f"{_worst_case_minutes:.1f} min for {config.MAX_MESSAGES_PER_RUN} messages")
+
+# The cap has to clear a three-day weekend backlog, which is the case it
+# exists for. 27 matches was the real figure observed on 27 September.
+check("the cap covers an observed weekend backlog",
+      config.MAX_MESSAGES_PER_RUN >= 27, str(config.MAX_MESSAGES_PER_RUN))
 
 
 if __name__ == "__main__":

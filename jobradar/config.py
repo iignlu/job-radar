@@ -340,7 +340,21 @@ CITIES: list[str] = []
 ALLOW_REMOTE = True
 
 # Ceiling per run. Overflow is deferred, not dropped — see cli.py.
-MAX_MESSAGES_PER_RUN = 12
+#
+# Raised from 12 because 12 was too low for the real shape of the week: the
+# Friday/Saturday gap means Sunday's first run faces three days of postings at
+# once. On 27 September that was 27 matches, so 15 of them spilled into the
+# evening run and 4 into the next day — jobs arriving late for no reason but
+# this number.
+#
+# 40 comfortably covers that backlog while staying a safety valve: if the
+# filters were ever loosened by mistake, the cap is what stops a flood, and
+# anything above it is deferred rather than dropped.
+#
+# This is OUR limit, not a Telegram or GitHub one — but it cannot be raised
+# alone. Telegram allows ~20 messages per minute to one group, so
+# notify.SEND_PAUSE_SECONDS paces the batch to match. Change the two together.
+MAX_MESSAGES_PER_RUN = 40
 
 # --------------------------------------------------------------------------
 # Liveness — making silence mean one thing instead of five
