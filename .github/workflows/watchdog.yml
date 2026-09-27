@@ -12,11 +12,18 @@ name: watchdog
 
 on:
   schedule:
-    # 12:30 UTC (15:30 Riyadh), Sunday–Thursday: after the 06:00 and 11:00
-    # alert runs, so on a healthy day the state file is ~1.5h old and a stale
-    # one is unambiguous. Deliberately NOT on the same cron as jobs.yml —
-    # a shared trigger is a shared failure.
-    - cron: "30 12 * * 0-4"
+    # 15:41 UTC (18:41 Riyadh), Sunday–Thursday: after the last alert slot
+    # (09:23 UTC) plus the 3-5 hours GitHub delays it by, so by now a healthy
+    # day has written state at least once. Deliberately NOT on the same cron
+    # as jobs.yml — a shared trigger is a shared failure — and on an
+    # off-the-hour minute for the same queueing reason.
+    #
+    # It asks "did a whole working day pass with no run?", not "was every slot
+    # on time". A single dropped slot costs nothing: unsent matches are never
+    # marked seen, so the next run delivers them. Alerting on that would cry
+    # wolf, and an alarm that cries wolf gets ignored -- which is exactly the
+    # failure this watchdog exists to prevent.
+    - cron: "41 15 * * 0-4"
   workflow_dispatch:
 
 permissions:

@@ -360,7 +360,12 @@ HEARTBEAT_AFTER_SILENT_RUNS = 3
 # Plain-language schedule, quoted in the heartbeat so "when should I next hear
 # from you?" is answered in the message itself. Keep in step with the cron in
 # .github/workflows/jobs.yml — they are two statements of the same fact.
-SCHEDULE_HUMAN = "09:00, 14:00 and 19:00 Riyadh time, Sunday–Thursday"
+#
+# Deliberately a WINDOW, not three clock times. The old wording promised
+# "09:00, 14:00 and 19:00" and the alerts were arriving 3-5 hours after that,
+# because GitHub queues free scheduled workflows. A stated time the bot cannot
+# keep is worse than no time at all: it teaches you to distrust the message.
+SCHEDULE_HUMAN = "three times each morning to early afternoon, Sunday–Thursday"
 
 # Watchdog threshold, in hours. A run that never starts cannot report its own
 # failure — GitHub cancelled one after fifteen minutes without ever giving it
@@ -368,10 +373,15 @@ SCHEDULE_HUMAN = "09:00, 14:00 and 19:00 Riyadh time, Sunday–Thursday"
 # workflow runs on its own schedule and checks how long ago the state file was
 # last written; anything past this is silence that has gone on too long.
 #
-# 8 hours, checked after the second run of the working day: by then two runs
-# should have written state, so a fresh file is ~1.5h old and a stale one is
-# unambiguous. Both workflows would have to fail together to hide an outage.
-WATCHDOG_MAX_SILENCE_HOURS = 8
+# 20 hours, checked late in the working day. The threshold is generous on
+# purpose, because GitHub's delay is variable: a perfectly healthy day can
+# show a 14-hour-old state file if only the first slot ran and the watchdog
+# itself fired late. A tighter bound would raise false alarms, and an alarm
+# that cries wolf gets ignored — which is the exact failure this exists to
+# prevent. 20 hours still catches the thing worth catching: a whole working
+# day with no successful run. A single dropped slot is not an outage, because
+# unsent matches are never marked seen and arrive on the next run.
+WATCHDOG_MAX_SILENCE_HOURS = 20
 
 # --------------------------------------------------------------------------
 # Presentation
