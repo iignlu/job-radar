@@ -66,6 +66,10 @@ on:
         description: "Test JSearch parameters one at a time (diagnostic, ~5 requests)"
         type: boolean
         default: false
+      probe_ats:
+        description: "Re-probe every watchlist company for a live ATS board (diagnostic, free)"
+        type: boolean
+        default: false
 
 # Needed to commit seen.json back to the repository.
 permissions:
@@ -107,8 +111,19 @@ jobs:
           PROBE_JSEARCH: ${{ inputs.probe_jsearch }}
           CHECK_CHAT: ${{ inputs.check_chat }}
           SAY: ${{ inputs.say }}
+          PROBE_ATS: ${{ inputs.probe_ats }}
         run: |
           set -euo pipefail
+
+          # The ATS probe is a standalone script rather than a jobradar flag:
+          # it answers "which watchlist companies have a board at all", which
+          # is a question about the watchlist, not about a run. Costs nothing —
+          # every board is public and unauthenticated.
+          if [ "${PROBE_ATS:-}" = "true" ]; then
+            echo "running: python tools/probe_ats.py"
+            python tools/probe_ats.py
+            exit $?
+          fi
 
           # --say takes free text, so it gets its own invocation with the value
           # quoted. The $args path below is deliberately unquoted for word
@@ -144,7 +159,7 @@ jobs:
       # its job, not suffering an outage, and "run FAILED — no jobs were sent"
       # is actively misleading when nothing was meant to be sent.
       - name: Report failure to Telegram
-        if: failure() && inputs.check_chat == '' && inputs.say == '' && inputs.probe_jsearch != true && inputs.dump_linkedin != true
+        if: failure() && inputs.check_chat == '' && inputs.say == '' && inputs.probe_jsearch != true && inputs.probe_ats != true && inputs.dump_linkedin != true
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
