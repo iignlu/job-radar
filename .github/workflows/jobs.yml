@@ -67,7 +67,7 @@ on:
         type: boolean
         default: false
       probe_ats:
-        description: "Re-probe every watchlist company for a live ATS board (diagnostic, free)"
+        description: "Re-probe the watchlist for live boards, ATS and Workday (diagnostic, free)"
         type: boolean
         default: false
 
@@ -115,13 +115,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The ATS probe is a standalone script rather than a jobradar flag:
-          # it answers "which watchlist companies have a board at all", which
-          # is a question about the watchlist, not about a run. Costs nothing —
-          # every board is public and unauthenticated.
+          # The board probes are standalone scripts rather than jobradar flags:
+          # they answer "which watchlist companies have a board at all", which
+          # is a question about the watchlist, not about a run. Both run
+          # together so one dispatch gives the whole picture rather than half
+          # of it. Costs nothing — every board is public and unauthenticated.
           if [ "${PROBE_ATS:-}" = "true" ]; then
             echo "running: python tools/probe_ats.py"
             python tools/probe_ats.py
+            echo
+            echo "running: python tools/probe_workday.py"
+            python tools/probe_workday.py
             exit $?
           fi
 
