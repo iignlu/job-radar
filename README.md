@@ -1,27 +1,54 @@
 # job-radar
 
-A job-alert bot for new graduates in Saudi Arabia. It polls the
-[JSearch API](https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch) (Google
-for Jobs — which indexes LinkedIn, Indeed and Glassdoor), filters for
-graduate-level software and data roles, and pushes each match to Telegram with
-the reason it matched and an apply link.
+A job-alert bot for new graduates in Saudi Arabia. It pulls postings from three
+sources, filters for graduate-level software and data roles, and pushes each
+match to Telegram with the reason it matched and an apply link.
 
 Runs on the GitHub Actions free tier. **Standard library only** — no `pip
 install`, anywhere, ever.
 
 ---
 
-## Why we don't scrape LinkedIn
+## Sources
+
+| Source | What it is | API quota |
+|:--|:--|:--|
+| **JSearch** | The [JSearch API](https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch) over Google for Jobs, which indexes LinkedIn, Indeed, Glassdoor and company career pages | ~200 requests/month, free plan |
+| **ATS boards** | Employers' own hiring systems — Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable | free, unmetered |
+| **LinkedIn alerts** | LinkedIn job-alert emails read from your own mailbox over IMAP | free |
+
+Sources are additive and independently optional. Unset `RAPIDAPI_KEY` and
+JSearch is skipped; unset `IMAP_USER` and LinkedIn is skipped; set
+`ENABLE_ATS = False` and the boards are skipped. Whatever is configured runs.
+
+### Why we don't scrape LinkedIn
 
 LinkedIn has no public jobs API. The endpoints its own web app calls are
 private, unversioned, and actively defended: hitting them from a script is a
 reliable way to get your account restricted or permanently banned, and the
 markup changes often enough that a scraper is broken more weeks than it works.
 
-JSearch sits on top of the Google for Jobs aggregate, which already contains
-the LinkedIn postings you wanted — plus Indeed, Glassdoor and company career
-pages — through a stable, documented, terms-of-service-compliant interface.
-One legitimate aggregator beats three brittle scrapers and a banned account.
+Two legitimate routes get you the same postings. JSearch sits on top of the
+Google for Jobs aggregate, which already contains the LinkedIn postings you
+wanted. And a **LinkedIn job alert** is mail you asked LinkedIn to send you —
+it arrives in your inbox by design, and reading your own mail breaks nothing.
+That second route reaches postings Google never indexed, which is the gap it
+closes.
+
+### Why ATS boards
+
+An aggregator's apply link increasingly leads to a signup wall or a paid plan,
+so a posting can match perfectly and still be unapplicable. An ATS board is the
+employer's own hiring system, so every link from it *is* the company's
+application form. The endpoints are public and unauthenticated, they cost
+nothing against the JSearch quota, and roles usually appear on a company's own
+board before an aggregator indexes them.
+
+The watchlist is `config.ATS_BOARDS`, and only boards confirmed by
+`tools/probe_ats.py` belong in it — a guessed slug returns the same empty
+result as a company with no openings, which is a source that silently finds
+nothing forever. To confirm a new company, add it to `config.ATS_COMPANIES` and
+run the **probe-ats** workflow (or `python tools/probe_ats.py <slug>` locally).
 
 ---
 
@@ -56,16 +83,37 @@ One legitimate aggregator beats three brittle scrapers and a banned account.
 2. Copy the `X-RapidAPI-Key` value from the code snippet on that page. That is
    `RAPIDAPI_KEY`.
 
-### 3. Local config
+### 3. LinkedIn alerts over IMAP *(optional)*
+
+1. On LinkedIn, save a job search and turn its **alert** on. Tune it there —
+   role, location, experience level — because the bot trusts that tuning (see
+   [Pre-filtered sources](#pre-filtered-sources)).
+2. Give the bot read access to the mailbox those alerts land in:
+   - `IMAP_USER` — the mailbox address
+   - `IMAP_PASSWORD` — on Gmail this must be an **App Password**
+     (Google Account → Security → 2-Step Verification → App passwords),
+     **never** your account password
+3. Non-Gmail mailboxes: set `config.IMAP_HOST`.
+
+Leave either variable unset and the source stays off.
+
+Alert-mail HTML changes without notice, so before relying on it, look at what
+the parser actually sees:
+
+```bash
+python -m jobradar --dump-linkedin
+```
+
+### 4. Local config
 
 ```bash
 cp .env.example .env
-# then fill in the three values
+# then fill in the values you want
 ```
 
 `.env` is gitignored. Never commit it.
 
-### 4. Try it without sending anything
+### 5. Try it without sending anything
 
 No credentials needed — fixture postings, no network, no quota:
 
@@ -79,13 +127,13 @@ Check your credentials are actually good:
 python -m jobradar --doctor
 ```
 
-Then a real dry run against the live API:
+Then a real dry run against the live sources:
 
 ```bash
 python -m jobradar --dry-run --show-rejected --date-posted week
 ```
 
-### 5. Ship it
+### 6. Ship it
 
 Push to a private repo, then add the secrets.
 
@@ -95,7 +143,9 @@ With the `gh` CLI:
 gh repo create job-radar --private --source=. --push
 gh secret set RAPIDAPI_KEY
 gh secret set TELEGRAM_TOKEN
-gh secret set TELEGRAM_CHAT_ID   # optional — see step 4
+gh secret set TELEGRAM_CHAT_ID   # optional — see step 1
+gh secret set IMAP_USER          # optional — see step 3
+gh secret set IMAP_PASSWORD      # optional — see step 3
 gh workflow run job-alerts
 ```
 
@@ -105,6 +155,7 @@ Or entirely in the browser, no CLI needed:
    - `RAPIDAPI_KEY`
    - `TELEGRAM_TOKEN`
    - `TELEGRAM_CHAT_ID` *(optional)*
+   - `IMAP_USER`, `IMAP_PASSWORD` *(optional)*
 2. **Actions → job-alerts → Run workflow**
 
 Scheduled runs only fire from the repository's **default branch** — if you
@@ -115,8 +166,11 @@ the default in Settings, or the cron will never trigger.
 
 ## Quota
 
-The free JSearch plan allows roughly **200 requests/month**. One request is one
-query on one run.
+Only JSearch is metered. ATS boards and IMAP cost nothing, so you can add
+companies and alerts freely — this table is about JSearch alone.
+
+The free plan allows roughly **200 requests/month**. One request is one query
+on one run.
 
 | queries | runs/day | working days | requests/month | free tier? |
 |--------:|---------:|-------------:|---------------:|:-----------|
@@ -134,21 +188,29 @@ subtract a run.
 
 ## Schedule
 
-`.github/workflows/jobs.yml` runs at `0 6,11,16 * * 0-4` UTC:
+`.github/workflows/jobs.yml` runs at `23 3,6,9 * * 0-4` UTC:
 
 | UTC   | Riyadh (UTC+3) |
 |------:|---------------:|
-| 06:00 | 09:00 |
-| 11:00 | 14:00 |
-| 16:00 | 19:00 |
+| 03:23 | 06:23 |
+| 06:23 | 09:23 |
+| 09:23 | 12:23 |
 
-Sunday through Thursday. GitHub cron is always UTC — there is no timezone
-setting — so the local times shift if Saudi Arabia ever adopts DST (it does
-not).
+Sunday through Thursday, inside Saudi working hours. GitHub cron is always UTC
+— there is no timezone setting — so the local times shift if Saudi Arabia ever
+adopts DST (it does not). The off-the-hour minute is deliberate: schedules on
+the hour queue behind everyone else's.
 
 Note that GitHub's scheduler is best-effort on the free tier: runs can be
 delayed by several minutes during busy periods, and very quiet repositories
 have their schedules disabled after 60 days of no activity.
+
+The workflow also takes manual runs (**Actions → job-alerts → Run workflow**)
+with three inputs: `date_posted` to widen the window, `limit` to raise the
+message cap, and `dump_linkedin` to inspect alert mail instead of running.
+Useful on a Friday or Saturday, when "today" is legitimately empty because the
+Saudi working week has not started — an empty run is indistinguishable from a
+broken one until you look further back.
 
 ---
 
@@ -161,10 +223,11 @@ python -m jobradar [options]
 --show-rejected               log every rejected posting and the layer that dropped it
 --date-posted {all,today,3days,week,month}
                               override config.DATE_POSTED
---limit N                     max messages this run (default 12)
+--limit N                     max messages this run (default 40)
 --verbose                     debug logging
 --demo                        use built-in fixture postings; no key, no network
 --doctor                      check credentials and connectivity, then exit
+--dump-linkedin               print the structure of your LinkedIn alert emails and exit
 --resolve-chat-id             print your Telegram chat id and exit
 ```
 
@@ -172,30 +235,65 @@ python -m jobradar [options]
 
 ## How filtering works
 
-Five layers, cheapest first, in `jobradar/filters.py`:
+Seven layers, cheapest first, in `jobradar/filters.py`. The order is the point:
+a string check over a title costs almost nothing, a regex sweep over a
+4000-character description costs more, so the layers that reject the most for
+the least run first.
 
 1. **Title exclusions** — `senior`, `lead`, `principal`, `manager`, … This is
    the layer that actually removes senior roles. A description will mention
    "senior stakeholders"; a title does not lie about its own level.
-2. **Body exclusions** — literal `5+ years` … `10+ years`, `at least 5 years`.
-3. **Must-match** — at least one early-career term (`graduate`, `junior`,
-   `تمهير`, …) or stack term (`software engineer`, `data analyst`, `power bi`,
-   `مطور`, …). The first four hits become the "why it matched" line in your
-   Telegram message.
-4. **Parsed experience** — a regex sweep for `N+ years`, `N-M years`, `N yrs`,
+2. **Freshness** — drops postings older than `MAX_AGE_DAYS` (14). Costs one
+   date parse, so it runs before any description scanning. Postings with no
+   date at all are kept: an unknown date is not evidence of staleness.
+3. **Working arrangement** — on-site and full-time. Remote and hybrid are
+   dropped by flag or by title only, never by description, since a description
+   saying "this role is not remote" would otherwise reject itself. The
+   full-time check applies only when the source states a type, because most ATS
+   boards omit it. `INTERN` and `TRAINEE` are deliberately allowed — تمهير and
+   graduate programmes are routinely tagged that way.
+4. **Body exclusions** — literal `5+ years` … `10+ years`, `at least 5 years`.
+5. **Role and level** — the role term must be in the **title**
+   (`software engineer`, `data analyst`, `power bi`, `مطور`, …). Descriptions
+   are unreliable: on an employer's board every posting repeats the same
+   graduate-scheme boilerplate, which let through Customer Care Advisor and
+   Fraud Investigator. Level terms (`graduate`, `junior`, `تمهير`, …) are
+   enrichment only — they can explain a match but never cause it. The first
+   four hits become the "why it matched" line in your Telegram message.
+6. **Parsed experience** — a regex sweep for `N+ years`, `N-M years`, `N yrs`,
    `N سنوات`. Takes the **first** number of a range and the **minimum** across
    the description. Descriptions are full of unrelated numbers ("3 year
    contract"), and a false rejection costs an opportunity while a false
    acceptance costs three seconds.
-5. **Geography** — only when `CITIES` is non-empty; remote roles pass anyway if
+7. **Geography** — only when `CITIES` is non-empty; remote roles pass anyway if
    `ALLOW_REMOTE`.
 
 Everything is tunable in `jobradar/config.py`. That is the only file you should
 need to edit to change what you get alerted about.
 
-## Message signature
+### Pre-filtered sources
 
-Every Telegram message ends with a footer set by `config.SIGNATURE`:
+Sources named in `config.PRE_FILTERED_SOURCES` skip layer 5 only. A LinkedIn
+alert is the result of a saved search you already tuned, and the alert mail
+carries no description for the keyword layers to read anyway.
+
+Skipping is deliberately narrow: seniority, freshness and working arrangement
+still apply, because those express what *you* will accept and no upstream
+search knows them. Dedup and the per-run cap also still apply, so a
+pre-filtered source cannot spam you.
+
+---
+
+## Message format
+
+Each alert carries the title, company, location, why it matched, and an apply
+link. When a posting offers the employer's own careers page or ATS,
+`PREFER_DIRECT_APPLY` leads with that instead of the aggregator link, since
+aggregator links increasingly sit behind a signup or a paid plan. Up to
+`MAX_ALTERNATE_APPLY_LINKS` (3) other routes are listed underneath, so a gated
+primary link is never a dead end.
+
+Every message ends with a footer set by `config.SIGNATURE`:
 
 ```
 — Abdullah Alshehri's Job Radar
@@ -214,14 +312,28 @@ window looks new — sending them individually means fifty notifications and a
 muted bot. Instead the bot marks them all seen, sends one summary, and stops.
 Real alerts start on the second run.
 
-**Overflow is deferred, not dropped.** At most `MAX_MESSAGES_PER_RUN` (12) go
-out per run, newest first. The rest are deliberately *not* marked seen, so they
+**Overflow is deferred, not dropped.** At most `MAX_MESSAGES_PER_RUN` (40) go
+out per run, newest first, paced by `notify.SEND_PAUSE_SECONDS` (3.2s, about
+18.75/minute) to stay under Telegram's ~20-per-minute limit to one chat. The
+cap and the pause have to change together. The rest are deliberately *not* marked seen, so they
 come back through the pipeline next run and arrive then. You get a short
 "N more deferred" note so you know they are queued.
 
 **State lives in git.** `seen.json` is committed back by the workflow after
-each run. No database, and the commit history doubles as a log of what the bot
-noticed and when.
+each run, capped at `MAX_SEEN_KEYS` (4000) so it stays cheap to commit. No
+database, and the commit history doubles as a log of what the bot noticed and
+when.
+
+**Silence is checked, not trusted.** The bot's normal output on a quiet day is
+nothing at all — which is also what a total outage looks like. `watchdog.yml`
+runs on its own separate schedule and asks the one question `jobs.yml` cannot
+ask about itself: when did the bot last do anything? `seen.json`'s timestamp
+answers it, so both workflows would have to fail together to hide an outage.
+
+**A silent source is a bug, not a quiet week.** Sources report what they found
+rather than assuming a layout, because a parser that silently returns nothing
+is indistinguishable from a slow hiring week — the failure that hid a JSearch
+outage for four runs.
 
 ---
 
@@ -233,7 +345,7 @@ jobradar/
   __main__.py        python -m jobradar
   cli.py             orchestration: fetch -> dedup -> filter -> deliver
   config.py          every tunable, with comments
-  filters.py         the five layers + the years parser
+  filters.py         the seven layers + the years parser
   http.py            urllib JSON client, retries 429/5xx only
   log.py             logging setup
   notify.py          Telegram formatting and delivery
@@ -242,11 +354,19 @@ jobradar/
     __init__.py
     base.py          Job dataclass + Source ABC
     jsearch.py       JSearch (RapidAPI)
+    ats.py           employer ATS boards, six providers
+    linkedin_email.py  LinkedIn job alerts over IMAP
     demo.py          fixture source for --demo, and a worked extension example
 tests/
   test_filters.py    run: python tests/test_filters.py
+tools/
+  probe_ats.py       find which ATS provider a company uses
+  probe_workday.py   measure which companies are reachable on Workday
+  watchdog.py        dead-man's switch: when did the bot last run?
 .github/workflows/
   jobs.yml           the scheduled alert run
+  probe-ats.yml      manual ATS discovery run
+  watchdog.yml       liveness check, on its own schedule
   tests.yml          tests on push and PR
 ```
 
@@ -254,11 +374,12 @@ tests/
 
 `build_sources()` in `cli.py` is the extension point. Everything downstream
 consumes `Job`, so a new source is purely additive: subclass `Source`,
-normalise into `Job`, append it to the list.
+normalise into `Job`, append it to the list. `sources/demo.py` is written as a
+worked example.
 
-Next up are ATS sources — Workday, Greenhouse and Lever expose public,
-unauthenticated JSON endpoints per company board, so they cost no API quota and
-often list a role hours before an aggregator picks it up.
+Adding an employer usually needs no code at all — probe the company with
+`tools/probe_ats.py` and add the confirmed `(name, provider, slug)` row to
+`config.ATS_BOARDS`.
 
 ## License
 
