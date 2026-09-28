@@ -188,17 +188,18 @@ subtract a run.
 
 ## Schedule
 
-`.github/workflows/jobs.yml` runs at `0 6,11,16 * * 0-4` UTC:
+`.github/workflows/jobs.yml` runs at `23 3,6,9 * * 0-4` UTC:
 
 | UTC   | Riyadh (UTC+3) |
 |------:|---------------:|
-| 06:00 | 09:00 |
-| 11:00 | 14:00 |
-| 16:00 | 19:00 |
+| 03:23 | 06:23 |
+| 06:23 | 09:23 |
+| 09:23 | 12:23 |
 
-Sunday through Thursday. GitHub cron is always UTC — there is no timezone
-setting — so the local times shift if Saudi Arabia ever adopts DST (it does
-not).
+Sunday through Thursday, inside Saudi working hours. GitHub cron is always UTC
+— there is no timezone setting — so the local times shift if Saudi Arabia ever
+adopts DST (it does not). The off-the-hour minute is deliberate: schedules on
+the hour queue behind everyone else's.
 
 Note that GitHub's scheduler is best-effort on the free tier: runs can be
 delayed by several minutes during busy periods, and very quiet repositories
@@ -222,7 +223,7 @@ python -m jobradar [options]
 --show-rejected               log every rejected posting and the layer that dropped it
 --date-posted {all,today,3days,week,month}
                               override config.DATE_POSTED
---limit N                     max messages this run (default 12)
+--limit N                     max messages this run (default 40)
 --verbose                     debug logging
 --demo                        use built-in fixture postings; no key, no network
 --doctor                      check credentials and connectivity, then exit
@@ -311,8 +312,10 @@ window looks new — sending them individually means fifty notifications and a
 muted bot. Instead the bot marks them all seen, sends one summary, and stops.
 Real alerts start on the second run.
 
-**Overflow is deferred, not dropped.** At most `MAX_MESSAGES_PER_RUN` (12) go
-out per run, newest first. The rest are deliberately *not* marked seen, so they
+**Overflow is deferred, not dropped.** At most `MAX_MESSAGES_PER_RUN` (40) go
+out per run, newest first, paced by `notify.SEND_PAUSE_SECONDS` (3.2s, about
+18.75/minute) to stay under Telegram's ~20-per-minute limit to one chat. The
+cap and the pause have to change together. The rest are deliberately *not* marked seen, so they
 come back through the pipeline next run and arrive then. You get a short
 "N more deferred" note so you know they are queued.
 
@@ -320,6 +323,12 @@ come back through the pipeline next run and arrive then. You get a short
 each run, capped at `MAX_SEEN_KEYS` (4000) so it stays cheap to commit. No
 database, and the commit history doubles as a log of what the bot noticed and
 when.
+
+**Silence is checked, not trusted.** The bot's normal output on a quiet day is
+nothing at all — which is also what a total outage looks like. `watchdog.yml`
+runs on its own separate schedule and asks the one question `jobs.yml` cannot
+ask about itself: when did the bot last do anything? `seen.json`'s timestamp
+answers it, so both workflows would have to fail together to hide an outage.
 
 **A silent source is a bug, not a quiet week.** Sources report what they found
 rather than assuming a layout, because a parser that silently returns nothing
@@ -352,9 +361,12 @@ tests/
   test_filters.py    run: python tests/test_filters.py
 tools/
   probe_ats.py       find which ATS provider a company uses
+  probe_workday.py   measure which companies are reachable on Workday
+  watchdog.py        dead-man's switch: when did the bot last run?
 .github/workflows/
   jobs.yml           the scheduled alert run
   probe-ats.yml      manual ATS discovery run
+  watchdog.yml       liveness check, on its own schedule
   tests.yml          tests on push and PR
 ```
 
