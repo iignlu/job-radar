@@ -11,10 +11,29 @@ name: job-alerts
 
 on:
   schedule:
-    # 06:00, 11:00 and 16:00 UTC, Sunday–Thursday.
-    # Saudi Arabia is UTC+3 -> 09:00, 14:00 and 19:00 local, on the Saudi
-    # working week. GitHub cron is always UTC and has no timezone option.
-    - cron: "0 6,11,16 * * 0-4"
+    # 03:23, 06:23 and 09:23 UTC, Sunday–Thursday. Saudi Arabia is UTC+3, so
+    # 06:23, 09:23 and 12:23 local. GitHub cron is always UTC, no timezone.
+    #
+    # Two things shape these numbers, and neither is obvious:
+    #
+    # 1. GitHub runs free scheduled workflows LATE. Measured over the week of
+    #    21-24 September: every run fired 3-5 hours after its slot. The old
+    #    16:00 UTC run was landing at 19:30-20:00 UTC, i.e. 22:30 Riyadh --
+    #    alerts arriving when nobody can act on them, and a whole night's head
+    #    start lost against other applicants. So the schedule is set EARLY on
+    #    purpose: the aim is that even a 5-hour delay lands inside Saudi
+    #    working hours (worst case 11:23, 14:23, 17:23 local). Early is
+    #    harmless -- a notification waits -- while late is the whole problem.
+    #
+    # 2. Minute 0 is the most contended minute of the hour, which is most of
+    #    why the delay is that large. An off-the-hour minute queues behind far
+    #    less. Hence :23 rather than :00.
+    #
+    # Still spaced 3 hours apart rather than clustered into one morning hour:
+    # runs that close together would find nothing new after the first, which
+    # both wastes JSearch quota and trips the silent-run heartbeat in
+    # config.py into firing on a perfectly healthy day.
+    - cron: "23 3,6,9 * * 0-4"
 
   # Manual runs can widen the window without touching config. Useful on a
   # Friday/Saturday, when "today" is legitimately empty because the Saudi
@@ -33,6 +52,22 @@ on:
         default: ""
       dump_linkedin:
         description: "Inspect LinkedIn alert emails instead of running (diagnostic)"
+        type: boolean
+        default: false
+      check_chat:
+        description: "Verify the bot can post to this chat/channel, e.g. @mychannel (diagnostic)"
+        type: string
+        default: ""
+      say:
+        description: "Post one message to the chat instead of running (Telegram HTML allowed)"
+        type: string
+        default: ""
+      probe_jsearch:
+        description: "Test JSearch parameters one at a time (diagnostic, ~5 requests)"
+        type: boolean
+        default: false
+      probe_ats:
+        description: "Re-probe the watchlist for live boards, ATS and Workday (diagnostic, free)"
         type: boolean
         default: false
 
@@ -73,16 +108,84 @@ jobs:
           DATE_POSTED: ${{ inputs.date_posted }}
           LIMIT: ${{ inputs.limit }}
           DUMP_LINKEDIN: ${{ inputs.dump_linkedin }}
+          PROBE_JSEARCH: ${{ inputs.probe_jsearch }}
+          CHECK_CHAT: ${{ inputs.check_chat }}
+          SAY: ${{ inputs.say }}
+          PROBE_ATS: ${{ inputs.probe_ats }}
         run: |
           set -euo pipefail
+
+          # The board probes are standalone scripts rather than jobradar flags:
+          # they answer "which watchlist companies have a board at all", which
+          # is a question about the watchlist, not about a run. Both run
+          # together so one dispatch gives the whole picture rather than half
+          # of it. Costs nothing — every board is public and unauthenticated.
+          if [ "${PROBE_ATS:-}" = "true" ]; then
+            echo "running: python tools/probe_ats.py"
+            python tools/probe_ats.py
+            echo
+            echo "running: python tools/probe_workday.py"
+            python tools/probe_workday.py
+            exit $?
+          fi
+
+          # --say takes free text, so it gets its own invocation with the value
+          # quoted. The $args path below is deliberately unquoted for word
+          # splitting, which would shred a message into one argument per word.
+          if [ -n "${SAY:-}" ]; then
+            echo "running: python -m jobradar --say <message>"
+            python -m jobradar --say "$SAY"
+            exit $?
+          fi
+
           args=""
           [ "${DUMP_LINKEDIN:-}" = "true" ] && args="--dump-linkedin"
+          [ "${PROBE_JSEARCH:-}" = "true" ] && args="--probe-jsearch"
+          [ -n "${CHECK_CHAT:-}" ] && args="--check-chat $CHECK_CHAT"
           if [ -z "$args" ]; then
             [ -n "${DATE_POSTED:-}" ] && args="$args --date-posted $DATE_POSTED"
             [ -n "${LIMIT:-}" ] && args="$args --limit $LIMIT"
           fi
           echo "running: python -m jobradar $args"
           python -m jobradar $args
+
+      # If the run above died, the bot cannot tell you — it died before the
+      # part that sends messages. So the workflow tells you instead, with curl
+      # rather than Python, so a syntax error or a crashed interpreter cannot
+      # take the alarm down with it.
+      #
+      # Goes to TELEGRAM_ADMIN_CHAT_ID when set, so that pointing
+      # TELEGRAM_CHAT_ID at a shared channel does not broadcast "run FAILED"
+      # to everyone subscribed to it. Falls back to the main chat id, then to
+      # the one cached in seen.json, so the alarm still works in exactly the
+      # situation that caused the first outage.
+      # Only for real alert runs. A diagnostic that reports a problem is doing
+      # its job, not suffering an outage, and "run FAILED — no jobs were sent"
+      # is actively misleading when nothing was meant to be sent.
+      - name: Report failure to Telegram
+        if: failure() && inputs.check_chat == '' && inputs.say == '' && inputs.probe_jsearch != true && inputs.probe_ats != true && inputs.dump_linkedin != true
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set +e
+          CHAT="${TELEGRAM_ADMIN_CHAT_ID:-${TELEGRAM_CHAT_ID:-}}"
+          if [ -z "$CHAT" ] && [ -f seen.json ]; then
+            CHAT=$(python -c "import json;print(json.load(open('seen.json')).get('chat_id',''))" 2>/dev/null)
+          fi
+          if [ -z "${TELEGRAM_TOKEN:-}" ] || [ -z "$CHAT" ]; then
+            echo "no Telegram credentials available - cannot report failure"
+            exit 0
+          fi
+          curl -sS -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            -d "chat_id=${CHAT}" \
+            -d "disable_web_page_preview=true" \
+            --data-urlencode "text=🔴 job-radar run FAILED — no jobs were sent this run. Nothing is lost: unsent matches are not marked seen and will arrive on the next successful run. Details: ${RUN_URL}" \
+            >/dev/null
+          echo "failure reported to Telegram"
 
       - name: Commit seen.json
         run: |

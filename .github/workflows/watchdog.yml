@@ -1,0 +1,53 @@
+# Dead-man's switch for the alert workflow.
+#
+# jobs.yml can report its own failures, but only if it runs. A scheduled run
+# was once cancelled after fifteen minutes without ever being given a runner:
+# no step executed, so nothing raised an alarm and the outage was
+# indistinguishable from a quiet evening.
+#
+# This workflow answers the question jobs.yml cannot ask about itself — when
+# did the bot last do anything at all? — from a separate schedule, so both
+# would have to fail together to hide an outage.
+name: watchdog
+
+on:
+  schedule:
+    # 15:41 UTC (18:41 Riyadh), Sunday–Thursday: after the last alert slot
+    # (09:23 UTC) plus the 3-5 hours GitHub delays it by, so by now a healthy
+    # day has written state at least once. Deliberately NOT on the same cron
+    # as jobs.yml — a shared trigger is a shared failure — and on an
+    # off-the-hour minute for the same queueing reason.
+    #
+    # It asks "did a whole working day pass with no run?", not "was every slot
+    # on time". A single dropped slot costs nothing: unsent matches are never
+    # marked seen, so the next run delivers them. Alerting on that would cry
+    # wolf, and an alarm that cries wolf gets ignored -- which is exactly the
+    # failure this watchdog exists to prevent.
+    - cron: "41 15 * * 0-4"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # No install step: the project is standard-library-only by design.
+
+      - name: Check for silence
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Preferred when set: an outage notice is for the maintainer, not
+          # for a channel of friends waiting on job alerts.
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+        run: python tools/watchdog.py

@@ -154,6 +154,7 @@ check(
 # different suffix. Before the fix they produced different keys and the job was
 # alerted twice.
 from jobradar.sources.jsearch import JSearchSource  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 import base64  # noqa: E402
 
@@ -272,7 +273,14 @@ _gh = _ats._to_job("Tamara", "greenhouse", "tamara", _gh_map, {
     "id": 4567, "title": "Graduate Software Engineer",
     "absolute_url": "https://boards.greenhouse.io/tamara/jobs/4567",
     "content": "<p>Join our <b>graduate</b> programme. Python and SQL.</p>",
-    "location": {"name": "Riyadh"}, "updated_at": "2026-08-01T10:00:00Z",
+    "location": {"name": "Riyadh"},
+    # Relative, not a fixed date. This was "2026-08-01T10:00:00Z", which sailed
+    # through in August and then started failing the freshness layer as the
+    # calendar moved past MAX_AGE_DAYS — a test that rots on a timer tells you
+    # nothing about the code. Two days old is fresh under any sane setting.
+    "updated_at": (
+        datetime.now(timezone.utc) - timedelta(days=2)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ"),
 })
 check("greenhouse posting maps to a Job", _gh.title == "Graduate Software Engineer", _gh.title)
 check("ATS link is marked direct", _gh.direct_url == _gh.url and _gh.best_url == _gh.url,
@@ -453,6 +461,29 @@ check("trusted source is STILL rejected when remote",
 _li_senior = job("Senior Business Operations Specialist", "", source="linkedin-email")
 check("trusted source is STILL rejected when senior",
       not evaluate(_li_senior, trust_source=True).accepted)
+
+
+# 19 — links must survive copy-paste into WhatsApp
+from jobradar.notify import format_job, shareable_url  # noqa: E402
+
+_LI = ("https://www.linkedin.com/comm/jobs/view/4444591579?alertAction=markasviewed"
+       "&savedSearchId=5466482073&trackingId=nULZ7Qf&refId=qnmQZ&lipi=urn%3Ali"
+       "&midToken=AQGPH&midSig=3QZmM&trk=eml-email_job_alert")
+check("tracking parameters are stripped",
+      len(shareable_url(_LI)) < 80, f"{len(shareable_url(_LI))} chars")
+check("the path is preserved", "/jobs/view/4444591579" in shareable_url(_LI))
+check("a clean url is left alone",
+      shareable_url("https://elm.sa/careers/12") == "https://elm.sa/careers/12")
+check("a malformed url does not crash", shareable_url("not a url") == "not a url")
+check("empty url stays empty", shareable_url("") == "")
+
+# The whole point: the address must appear as text, not hidden in an anchor,
+# or copying the message to forward it yields "Apply" and no link.
+_msg = format_job(job("Data Analyst", "x", url="https://elm.sa/careers/12"), "reason")
+check("the URL appears as plain text in the body",
+      "https://elm.sa/careers/12" in _msg, _msg)
+check("the primary link is not wrapped in an anchor",
+      '<a href="https://elm.sa/careers/12"' not in _msg, _msg)
 
 
 if __name__ == "__main__":

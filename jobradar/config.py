@@ -29,9 +29,24 @@ COUNTRY = "sa"
 # change this one string.
 JSEARCH_ENDPOINT = "search-v2"
 
-# One of: all | today | 3days | week | month. `today` suits a 3×/day schedule —
-# anything wider re-fetches the same postings we already marked seen.
-DATE_POSTED = "today"
+# One of: all | today | 3days | week | month.
+#
+# This was "today", on the reasoning that a 3×/day schedule does not need a
+# wider window and anything wider just re-fetches postings already marked seen.
+# The reasoning was sound and the result was that JSearch returned nothing at
+# all, for weeks. Measured on 14 August with --probe-jsearch, same key, same
+# query, one parameter changed:
+#
+#     date_posted=today ->  0 postings
+#     date_posted=week  ->  4 postings   e.g. "Associate Consultant (Fresh Grad role)"
+#     date_posted=all   -> 10 postings   e.g. "Graduate Development Program Engineer"
+#
+# So "today" is not a narrower window on this endpoint, it is an empty one.
+# "week" is the right setting anyway: MAX_AGE_DAYS already caps freshness at
+# 14 days locally and seen.json dedups, so a wider server-side window costs no
+# extra requests and re-fetching a known posting is free — while missing one
+# is not.
+DATE_POSTED = "week"
 
 # JSearch-side pre-filter, e.g. "under_3_years_experience,no_experience".
 #
@@ -83,6 +98,14 @@ ATS_BOARDS = [
 ]
 
 ENABLE_ATS = True
+
+# JSearch is the only metered source and the only one that has ever gone
+# quiet on us. Set this to False to run on the free sources alone — the ATS
+# boards and your LinkedIn alerts supply ~300 postings a run between them and
+# produce every alert you currently receive, so switching it off costs less
+# than it sounds like. Left on by default: when JSearch works it reaches
+# postings the other two never see.
+ENABLE_JSEARCH = True
 
 # --------------------------------------------------------------------------
 # LinkedIn, via your own job-alert emails
@@ -317,7 +340,62 @@ CITIES: list[str] = []
 ALLOW_REMOTE = True
 
 # Ceiling per run. Overflow is deferred, not dropped — see cli.py.
-MAX_MESSAGES_PER_RUN = 12
+#
+# Raised from 12 because 12 was too low for the real shape of the week: the
+# Friday/Saturday gap means Sunday's first run faces three days of postings at
+# once. On 27 September that was 27 matches, so 15 of them spilled into the
+# evening run and 4 into the next day — jobs arriving late for no reason but
+# this number.
+#
+# 40 comfortably covers that backlog while staying a safety valve: if the
+# filters were ever loosened by mistake, the cap is what stops a flood, and
+# anything above it is deferred rather than dropped.
+#
+# This is OUR limit, not a Telegram or GitHub one — but it cannot be raised
+# alone. Telegram allows ~20 messages per minute to one group, so
+# notify.SEND_PAUSE_SECONDS paces the batch to match. Change the two together.
+MAX_MESSAGES_PER_RUN = 40
+
+# --------------------------------------------------------------------------
+# Liveness — making silence mean one thing instead of five
+# --------------------------------------------------------------------------
+#
+# The bot's normal output on a quiet day is nothing at all. That is also its
+# output when the chat id has expired, when a run never got a runner, when a
+# source has died, and when it is simply the weekend. Five different states,
+# one indistinguishable symptom — which is why both outages so far were
+# spotted by a human noticing the quiet rather than by the system.
+#
+# After this many consecutive runs that delivered nothing, say so out loud.
+# 3 is one full working day: quiet enough not to nag, frequent enough that a
+# genuine outage surfaces the same day it starts.
+HEARTBEAT_AFTER_SILENT_RUNS = 3
+
+# Plain-language schedule, quoted in the heartbeat so "when should I next hear
+# from you?" is answered in the message itself. Keep in step with the cron in
+# .github/workflows/jobs.yml — they are two statements of the same fact.
+#
+# Deliberately a WINDOW, not three clock times. The old wording promised
+# "09:00, 14:00 and 19:00" and the alerts were arriving 3-5 hours after that,
+# because GitHub queues free scheduled workflows. A stated time the bot cannot
+# keep is worse than no time at all: it teaches you to distrust the message.
+SCHEDULE_HUMAN = "three times each morning to early afternoon, Sunday–Thursday"
+
+# Watchdog threshold, in hours. A run that never starts cannot report its own
+# failure — GitHub cancelled one after fifteen minutes without ever giving it
+# a runner, and no step ran, so nothing could raise the alarm. The watchdog
+# workflow runs on its own schedule and checks how long ago the state file was
+# last written; anything past this is silence that has gone on too long.
+#
+# 20 hours, checked late in the working day. The threshold is generous on
+# purpose, because GitHub's delay is variable: a perfectly healthy day can
+# show a 14-hour-old state file if only the first slot ran and the watchdog
+# itself fired late. A tighter bound would raise false alarms, and an alarm
+# that cries wolf gets ignored — which is the exact failure this exists to
+# prevent. 20 hours still catches the thing worth catching: a whole working
+# day with no successful run. A single dropped slot is not an outage, because
+# unsent matches are never marked seen and arrive on the next run.
+WATCHDOG_MAX_SILENCE_HOURS = 20
 
 # --------------------------------------------------------------------------
 # Presentation

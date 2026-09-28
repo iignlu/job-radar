@@ -8,6 +8,7 @@ Telegram reject the whole send with a 400.
 
 import html
 import time
+import urllib.parse
 from datetime import datetime, timezone
 
 from . import config, http, log
@@ -17,10 +18,19 @@ _log = log.get(__name__)
 API_ROOT = "https://api.telegram.org/bot{token}/{method}"
 API_TEMPLATE = "https://api.telegram.org/bot{token}/sendMessage"
 
-# Telegram tolerates roughly one message per second to a single chat. 1.2s is
-# a deliberate margin — a run sends at most a dozen, so the extra seconds cost
-# nothing and a 429 mid-batch would cost the rest of the batch.
-SEND_PAUSE_SECONDS = 1.2
+# Telegram's binding limit here is not the per-second one — it is roughly
+# 20 messages per MINUTE to a single group, and the alerts go to a group.
+#
+# This used to be 1.2s, i.e. 50/minute, which was over that limit and got away
+# with it only because MAX_MESSAGES_PER_RUN was 12: a dozen messages never ran
+# long enough for the per-minute window to bite. Raising the cap removed that
+# accident, so the pace has to be honest. 3.2s is ~18.75/minute — under 20 with
+# margin for the retry backoff.
+#
+# The cost is nothing that matters: 40 messages take about two minutes of a
+# workflow run that is otherwise idle. A 429 mid-batch, by contrast, costs the
+# rest of the batch. Move this and MAX_MESSAGES_PER_RUN together.
+SEND_PAUSE_SECONDS = 3.2
 
 # Telegram hard-caps message bodies at 4096 characters.
 MAX_BODY = 4000
@@ -56,20 +66,114 @@ def resolve_chat_id(token: str) -> str:
             "your bot any message (e.g. 'hi'), then run this again."
         )
 
-    # result[0] first, as documented, but fall back to scanning every update:
-    # a /start arrives as my_chat_member rather than message, and that would
-    # otherwise look like a failure.
+    # Scan every update rather than trusting result[0]: a /start arrives as
+    # my_chat_member rather than message, and that would otherwise look like
+    # a failure.
+    found: list[str] = []
     for update in results:
         for field in ("message", "edited_message", "channel_post", "my_chat_member"):
             container = update.get(field) or {}
             chat_id = (container.get("chat") or {}).get("id")
-            if chat_id is not None:
-                return str(chat_id)
+            if chat_id is not None and str(chat_id) not in found:
+                found.append(str(chat_id))
 
-    raise ChatIdUnavailable(
-        f"got {len(results)} update(s) but none carried a chat id. "
-        "Send your bot a plain text message and retry."
+    if not found:
+        raise ChatIdUnavailable(
+            f"got {len(results)} update(s) but none carried a chat id. "
+            "Send your bot a plain text message and retry."
+        )
+
+    # More than one chat means other people have messaged the bot — which now
+    # happens whenever its link is shared. Picking the first would silently
+    # deliver someone's job alerts to a stranger, so refuse and make the
+    # operator choose. Guessing is the one thing this must not do.
+    if len(found) > 1:
+        raise ChatIdUnavailable(
+            f"getUpdates shows {len(found)} different chats ({', '.join(found)}) "
+            "— the bot cannot tell which one is yours. Set TELEGRAM_CHAT_ID "
+            "explicitly to the one you want alerts delivered to."
+        )
+
+    return found[0]
+
+
+def check_chat(token: str, chat_id: str) -> list[str]:
+    """Report whether the bot can actually post to `chat_id`.
+
+    Exists because a misconfigured destination fails *quietly*: sendMessage
+    raises, the error is logged, the run still succeeds, and the result is a
+    silent evening indistinguishable from a slow week. Better to answer
+    "can you post here?" before pointing the live secret at somewhere new.
+
+    Read-only — it posts nothing. Returns human-readable findings.
+    """
+    findings = []
+
+    try:
+        bot = describe_bot(token)
+        bot_id = bot.get("id")
+        findings.append(f"OK    token valid — bot is @{bot.get('username', '?')}")
+    except http.HttpError as exc:
+        return [f"FAIL  token rejected by Telegram: {exc}"]
+
+    try:
+        chat = (http.get_json(
+            API_ROOT.format(token=token, method="getChat"),
+            params={"chat_id": chat_id},
+        ).get("result") or {})
+    except http.HttpError as exc:
+        findings.append(f"FAIL  cannot see {chat_id}: {exc}")
+        findings.append("      Check the name is exact, and that the channel is "
+                        "public (a private one needs its numeric -100... id).")
+        return findings
+
+    kind = chat.get("type", "?")
+    findings.append(
+        f"OK    found {kind} {chat.get('title') or chat.get('username') or chat_id!r} "
+        f"(numeric id {chat.get('id')})"
     )
+
+    # Being able to see a public channel proves nothing about posting to it —
+    # that needs administrator rights, and this is the step people miss.
+    try:
+        member = (http.get_json(
+            API_ROOT.format(token=token, method="getChatMember"),
+            params={"chat_id": chat_id, "user_id": bot_id},
+        ).get("result") or {})
+    except http.HttpError as exc:
+        findings.append(f"FAIL  cannot read the bot's membership: {exc}")
+        return findings
+
+    status = member.get("status")
+
+    # What counts as "can post" depends on the kind of chat, and conflating
+    # them produces a confident wrong answer:
+    #
+    #   channel          broadcast-only; posting needs admin + can_post_messages
+    #   group/supergroup any member may post; can_post_messages is not set here
+    #                    at all (the API documents it as channels-only), so
+    #                    requiring it fails a chat that works perfectly
+    #   private          a direct chat with you; nothing to grant
+    if status in ("left", "kicked"):
+        findings.append(f"FAIL  bot is not in this {kind} (status '{status}') — "
+                        "add it first")
+    elif kind == "private":
+        findings.append("OK    private chat — no permissions needed")
+    elif kind == "channel":
+        if status != "administrator":
+            findings.append(f"FAIL  bot's status is '{status}', not administrator. "
+                            "A channel only accepts posts from admins.")
+        elif not member.get("can_post_messages"):
+            findings.append("FAIL  bot is an administrator but lacks 'Post "
+                            "Messages' — enable that permission")
+        else:
+            findings.append("OK    bot is an administrator and can post messages")
+    else:
+        # Group or supergroup. Admin is not required; being present is enough
+        # unless the group restricts sending for everyone.
+        findings.append(f"OK    bot is a '{status}' of this {kind} and may post")
+
+    return findings
 
 
 def humanise_age(iso: str | None) -> str:
@@ -118,6 +222,41 @@ def with_signature(body: str) -> str:
     return body[: MAX_BODY - len(footer)] + footer
 
 
+# Tracking parameters that make a link unshareably long without changing where
+# it goes. LinkedIn alert URLs are ~600 characters of these; stripped, the same
+# job is a 45-character link.
+_TRACKING_PARAMS = {
+    "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+    "trk", "trackingid", "refid", "lipi", "miditoken", "midtoken", "midsig",
+    "ebp", "originalsubdomain", "position", "pagenum", "alertaction",
+    "savedsearchid", "savedsearchauthtoken", "eid", "src", "source",
+    "gh_src", "ref",
+}
+
+
+def shareable_url(url: str) -> str:
+    """Strip tracking parameters so the link survives being pasted elsewhere.
+
+    Exists because these alerts get forwarded to friends on WhatsApp. A 600
+    character URL wraps badly, and some clients truncate it into a dead link.
+    """
+    if not url:
+        return ""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        kept = [
+            (key, value)
+            for key, value in urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+            if key.lower() not in _TRACKING_PARAMS
+        ]
+        return urllib.parse.urlunsplit(
+            (parts.scheme, parts.netloc, parts.path,
+             urllib.parse.urlencode(kept), "")
+        )
+    except Exception:
+        return url
+
+
 def _apply_lines(job, esc) -> list:
     """The apply row(s): lead with the employer's own link when there is one.
 
@@ -127,15 +266,21 @@ def _apply_lines(job, esc) -> list:
     primary = job.best_url if config.PREFER_DIRECT_APPLY else job.url
     if not primary:
         return []
+    primary = shareable_url(primary)
 
-    is_direct = bool(job.direct_url) and primary == job.direct_url
-    label = "Apply on company site →" if is_direct else "Apply →"
-    lines = [f'<a href="{esc(primary, quote=True)}">{label}</a>']
+    is_direct = bool(job.direct_url) and primary == shareable_url(job.direct_url)
+    label = "Apply on company site" if is_direct else "Apply"
+
+    # The URL goes in as PLAIN TEXT, not an anchor. Telegram auto-links it, so
+    # it stays tappable — but an anchor hides the address, and copying one to
+    # forward the job to someone gives them the words "Apply →" and no link.
+    # These alerts get shared, so the address has to be in the text.
+    lines = [f"🔗 {label}:", esc(primary)]
 
     limit = config.MAX_ALTERNATE_APPLY_LINKS
     if limit:
         alternates = [
-            f'<a href="{esc(o["url"], quote=True)}">{esc(o["publisher"] or "link")}</a>'
+            f'<a href="{esc(shareable_url(o["url"]), quote=True)}">{esc(o["publisher"] or "link")}</a>'
             for o in job.alternate_options[:limit]
         ]
         if alternates:
@@ -183,27 +328,31 @@ def format_job(job, reason: str) -> str:
 class Telegram:
     """Sender. In dry-run mode it prints and never touches the network."""
 
-    def __init__(self, token: str, chat_id: str, dry_run: bool = False,
-                 pause: float = SEND_PAUSE_SECONDS):
+    def __init__(self, token: str, chat_id: str, admin_chat_id: str = "",
+                 dry_run: bool = False, pause: float = SEND_PAUSE_SECONDS):
         self.token = token
         self.chat_id = chat_id
+        # Where operational messages go. Once chat_id points at a channel of
+        # friends, "run FAILED" and "still watching" are noise to everyone but
+        # the person who maintains the bot — so they get their own destination,
+        # defaulting to the main one when nobody has split them out.
+        self.admin_chat_id = admin_chat_id or chat_id
         self.dry_run = dry_run
         self.pause = pause
         self.sent = 0
 
-    def send_raw(self, body: str) -> bool:
-        """Send one pre-formatted HTML message."""
+    def _send(self, body: str, target: str, label: str) -> bool:
         body = with_signature(body)
 
         if self.dry_run:
             # No pause here: dry runs are for reading output, not pacing it.
-            print("\n--- telegram (dry-run) " + "-" * 44)
+            print(f"\n--- telegram {label} (dry-run) " + "-" * 34)
             print(body)
             print("-" * 66)
             self.sent += 1
             return True
 
-        if not self.token or not self.chat_id:
+        if not self.token or not target:
             _log.error("cannot send: TELEGRAM_TOKEN or TELEGRAM_CHAT_ID missing")
             return False
 
@@ -211,19 +360,32 @@ class Telegram:
             http.post_json(
                 API_TEMPLATE.format(token=self.token),
                 {
-                    "chat_id": self.chat_id,
+                    "chat_id": target,
                     "text": body,
                     "parse_mode": "HTML",
                     "disable_web_page_preview": True,
                 },
             )
         except http.HttpError as exc:
-            _log.error("telegram send failed: %s", exc)
+            _log.error("telegram send to %s failed: %s", label, exc)
             return False
 
         self.sent += 1
         time.sleep(self.pause)
         return True
+
+    def send_raw(self, body: str) -> bool:
+        """Send one pre-formatted HTML message to the audience."""
+        return self._send(body, self.chat_id, "chat")
+
+    def send_admin(self, body: str) -> bool:
+        """Send an operational message to whoever runs the bot.
+
+        Separate from send_raw so that pointing chat_id at a shared channel
+        does not start broadcasting failure notices and heartbeats to everyone
+        subscribed to it.
+        """
+        return self._send(body, self.admin_chat_id, "admin")
 
     def send_job(self, job, reason: str) -> bool:
         return self.send_raw(format_job(job, reason))

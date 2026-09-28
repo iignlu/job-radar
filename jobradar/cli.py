@@ -6,10 +6,13 @@ and the overflow deferral.
 """
 
 import argparse
+import html as _html
 
 from . import config, log
 from .filters import Verdict, evaluate
-from .notify import ChatIdUnavailable, Telegram, describe_bot, resolve_chat_id
+from .notify import (
+    ChatIdUnavailable, Telegram, check_chat, describe_bot, resolve_chat_id,
+)
 from .sources.ats import ATSSource
 from .sources.demo import DemoSource
 from .sources.linkedin_email import from_config as linkedin_from_config
@@ -59,6 +62,18 @@ def parse_args(argv=None) -> argparse.Namespace:
         "--resolve-chat-id", action="store_true",
         help="print your Telegram chat id (from getUpdates) and exit",
     )
+    parser.add_argument(
+        "--say", metavar="TEXT", default=None,
+        help="send one message to TELEGRAM_CHAT_ID and exit (Telegram HTML allowed)",
+    )
+    parser.add_argument(
+        "--check-chat", metavar="CHAT_ID", default=None,
+        help="verify the bot can post to a chat/channel (e.g. @mychannel), then exit",
+    )
+    parser.add_argument(
+        "--probe-jsearch", action="store_true",
+        help="test JSearch parameters one at a time and exit (costs ~5 requests)",
+    )
     return parser.parse_args(argv)
 
 
@@ -92,16 +107,100 @@ def build_sources(args) -> list:
     if linkedin:
         sources.append(linkedin)
 
-    sources.append(
-        JSearchSource(
-            api_key=config.env("RAPIDAPI_KEY"),
-            queries=config.QUERIES,
-            country=config.COUNTRY,
-            date_posted=args.date_posted or config.DATE_POSTED,
-            job_requirements=config.JOB_REQUIREMENTS,
+    if config.ENABLE_JSEARCH:
+        sources.append(
+            JSearchSource(
+                api_key=config.env("RAPIDAPI_KEY"),
+                queries=config.QUERIES,
+                country=config.COUNTRY,
+                date_posted=args.date_posted or config.DATE_POSTED,
+                job_requirements=config.JOB_REQUIREMENTS,
+            )
         )
-    )
+    else:
+        _log.info("jsearch disabled in config — running on the free sources only")
     return sources
+
+
+def chat_id_for_run(configured: str, store, token: str, dry_run: bool = False,
+                    resolver=resolve_chat_id) -> str:
+    """Settle on a chat id, in descending order of durability.
+
+    1. the TELEGRAM_CHAT_ID secret — set once, never expires
+    2. the value cached in the state file — survives getUpdates expiry
+    3. getUpdates — only works within ~24h of you last messaging the bot
+
+    Step 2 exists because step 3 alone is not a foundation. Telegram retains
+    updates for roughly a day, so the first quiet day left the bot with no way
+    to address anyone: four consecutive scheduled runs aborted here, and
+    because a bot that sends nothing looks exactly like a quiet week, nobody
+    noticed until the fifth.
+
+    Whatever is settled on is written back to the store, so the id is cached
+    even when it came from the secret — that keeps the fallback warm if the
+    secret is ever rotated away.
+
+    Raises ChatIdUnavailable when a send is expected and no id can be found.
+    """
+    chat_id = configured
+    if chat_id:
+        _log.info("using TELEGRAM_CHAT_ID from the environment")
+    elif store.chat_id:
+        chat_id = store.chat_id
+        _log.info("using chat id %s cached in %s", chat_id, store.path)
+    elif token and not dry_run:
+        chat_id = resolver(token)
+        _log.info("resolved TELEGRAM_CHAT_ID=%s from getUpdates", chat_id)
+        _log.info("set it as a repository secret to skip this lookup in future")
+
+    if chat_id:
+        store.chat_id = chat_id
+    return chat_id
+
+
+def record_silence(store, delivered: bool) -> int:
+    """Update the silent-run counter; return the count when it is time to speak.
+
+    Returns 0 when the bot should stay quiet, otherwise the number of
+    consecutive silent runs that have just elapsed. Resets the counter when it
+    fires, so a long outage produces a periodic note rather than one message
+    per run for the rest of time.
+    """
+    if delivered:
+        store.silent_runs = 0
+        return 0
+
+    store.silent_runs += 1
+    if store.silent_runs < config.HEARTBEAT_AFTER_SILENT_RUNS:
+        return 0
+
+    elapsed = store.silent_runs
+    store.silent_runs = 0
+    return elapsed
+
+
+def heartbeat_message(silent_runs: int, examined: int, yields) -> str:
+    """The "still alive, nothing to send" note.
+
+    Names what was checked, so that "nothing matched your filters" is visibly
+    different from "nothing worked" — the distinction the receiving end could
+    not previously make, and the reason two outages were caught by a person
+    rather than by the system.
+    """
+    checked = ", ".join(
+        f"{name}: {'unreachable' if count is None else count}"
+        for name, count in yields
+    ) or "none configured"
+
+    return (
+        "🟢 <b>Still watching — nothing new to send</b>\n\n"
+        f"No new match in the last {silent_runs} check(s). "
+        f"The most recent one looked at {examined} posting(s).\n\n"
+        f"Sources — {_html.escape(checked)}\n\n"
+        f"Next checks: {_html.escape(config.SCHEDULE_HUMAN)}.\n\n"
+        "This note only appears when the bot has been quiet, so silence "
+        "never has to mean guessing whether it broke."
+    )
 
 
 def _sort_key(pair):
@@ -136,15 +235,22 @@ def doctor() -> int:
             problems += 1
             token = ""
 
-    # --- Telegram chat id
+    # --- Telegram chat id. Reported in the same precedence the run uses, so
+    # this output answers "where is the bot getting its chat id from today?"
     chat_id = config.env("TELEGRAM_CHAT_ID", required=False)
+    cached = SeenStore(config.STATE_PATH, max_keys=config.MAX_SEEN_KEYS).chat_id
     if chat_id:
         print(f"OK    TELEGRAM_CHAT_ID set explicitly ({chat_id})")
+    elif cached:
+        print(f"OK    TELEGRAM_CHAT_ID not set, using the id cached in "
+              f"{config.STATE_PATH} ({cached})")
+        print("      Set it as a secret so it does not depend on the state file.")
     elif token:
         try:
             resolved = resolve_chat_id(token)
             print(f"OK    TELEGRAM_CHAT_ID not set, but resolved from getUpdates: {resolved}")
-            print("      Set it as a secret to avoid resolving it every run.")
+            print("      Set it as a secret: getUpdates only keeps ~24h of history,")
+            print("      so this lookup stops working the first quiet day.")
         except (ChatIdUnavailable, HttpError) as exc:
             print(f"FAIL  could not resolve a chat id: {exc}")
             problems += 1
@@ -204,6 +310,61 @@ def main(argv=None) -> int:
             print(f"  {job.native_id}  {job.title}")
         return 0
 
+    if args.say:
+        # One-off message to the audience: a welcome post when a new channel
+        # goes live, or an end-to-end proof that delivery works on a day when
+        # no job happens to match. Uses the same destination and signature as
+        # a real alert, so a successful --say proves the real path.
+        try:
+            token = config.env("TELEGRAM_TOKEN")
+        except config.MissingSetting as exc:
+            _log.error("%s", exc)
+            return 2
+
+        store = SeenStore(config.STATE_PATH, max_keys=config.MAX_SEEN_KEYS)
+        try:
+            chat_id = chat_id_for_run(
+                config.env("TELEGRAM_CHAT_ID", required=False), store, token,
+                dry_run=args.dry_run,
+            )
+        except ChatIdUnavailable as exc:
+            _log.error("%s", exc)
+            return 2
+
+        if Telegram(token, chat_id, dry_run=args.dry_run).send_raw(args.say):
+            _log.info("sent to %s", chat_id)
+            return 0
+        _log.error("could not send to %s — run --check-chat %s", chat_id, chat_id)
+        return 1
+
+    if args.check_chat:
+        try:
+            findings = check_chat(config.env("TELEGRAM_TOKEN"), args.check_chat)
+        except config.MissingSetting as exc:
+            _log.error("%s", exc)
+            return 2
+        for line in findings:
+            print(line)
+        failed = [f for f in findings if f.startswith("FAIL")]
+        print()
+        print("cannot post there yet" if failed
+              else f"ready — set TELEGRAM_CHAT_ID to {args.check_chat}")
+        return 1 if failed else 0
+
+    if args.probe_jsearch:
+        try:
+            JSearchSource(
+                api_key=config.env("RAPIDAPI_KEY"),
+                queries=config.QUERIES,
+                country=config.COUNTRY,
+                date_posted=args.date_posted or config.DATE_POSTED,
+                job_requirements=config.JOB_REQUIREMENTS,
+            ).probe()
+        except config.MissingSetting as exc:
+            _log.error("%s", exc)
+            return 2
+        return 0
+
     if args.resolve_chat_id:
         try:
             print(resolve_chat_id(config.env("TELEGRAM_TOKEN")))
@@ -224,31 +385,58 @@ def main(argv=None) -> int:
         _log.error("%s", exc)
         return 2
 
-    # Chat id is optional config: if it is absent we derive it from the bot's
-    # own updates. One less secret to set up, and it works identically on the
-    # Actions runner. Explicitly-set values always win.
-    if not chat_id and token and not args.dry_run:
-        try:
-            chat_id = resolve_chat_id(token)
-            _log.info("resolved TELEGRAM_CHAT_ID=%s from getUpdates", chat_id)
-            _log.info("set it as a repository secret to skip this lookup in future")
-        except ChatIdUnavailable as exc:
-            _log.error("%s", exc)
-            return 2
+    # Loaded before the chat-id block because the store is where a previously
+    # resolved chat id lives.
+    store = SeenStore(config.STATE_PATH, max_keys=config.MAX_SEEN_KEYS)
 
-    telegram = Telegram(token, chat_id, dry_run=args.dry_run)
+    try:
+        chat_id = chat_id_for_run(chat_id, store, token, dry_run=args.dry_run)
+    except ChatIdUnavailable as exc:
+        _log.error("%s", exc)
+        return 2
+
+    # TELEGRAM_ADMIN_CHAT_ID is optional and only matters once TELEGRAM_CHAT_ID
+    # points at a shared channel: it keeps operational noise going to the
+    # person who maintains the bot rather than to everyone subscribed.
+    telegram = Telegram(
+        token, chat_id,
+        admin_chat_id=config.env("TELEGRAM_ADMIN_CHAT_ID", required=False),
+        dry_run=args.dry_run,
+    )
 
     # ---- fetch -----------------------------------------------------------
     fetched = []
     budget = 0
+    yields: list[tuple[str, int | None]] = []
     for source in sources:
         budget += source.request_cost
         try:
-            fetched.extend(source.fetch())
+            postings = source.fetch()
         except Exception as exc:
             _log.error("source %s failed entirely: %s", source.name, exc)
+            yields.append((source.name, None))
+            continue
+        fetched.extend(postings)
+        yields.append((source.name, len(postings)))
 
+    # Per-source accounting on one line. Without it the run log reports a
+    # single total, and a source that quietly stops contributing is invisible
+    # for as long as the others cover for it — which is how a dead JSearch
+    # went unnoticed while ATS and LinkedIn supplied 300 postings a run.
+    _log.info(
+        "source yield: %s",
+        ", ".join(
+            f"{name}={'FAILED' if count is None else count}"
+            for name, count in yields
+        ),
+    )
     _log.info("fetched %d posting(s) using ~%d API request(s)", len(fetched), budget)
+
+    if not fetched:
+        _log.error(
+            "every source returned nothing. That is not a quiet week — check "
+            "the per-source line above and run --doctor."
+        )
 
     # ---- dedup -----------------------------------------------------------
     # Two queries overlap heavily; the same posting also gets syndicated to
@@ -260,8 +448,6 @@ def main(argv=None) -> int:
     if len(jobs) != len(fetched):
         _log.info("deduped %d -> %d posting(s)", len(fetched), len(jobs))
 
-    store = SeenStore(config.STATE_PATH, max_keys=config.MAX_SEEN_KEYS)
-
     # ---- first run -------------------------------------------------------
     # CRITICAL: on a first run every posting in the window looks "new", so
     # sending them individually means fifty notifications in ten minutes and a
@@ -270,7 +456,7 @@ def main(argv=None) -> int:
     if store.first_run:
         matched = sum(1 for job in jobs if evaluate(job).accepted)
         store.add_all(job.key for job in jobs)
-        telegram.send_raw(
+        telegram.send_admin(
             "👋 <b>job-radar is armed</b>\n"
             f"Marked {len(jobs)} existing posting(s) as seen, "
             f"{matched} of which matched your filters.\n"
@@ -315,8 +501,27 @@ def main(argv=None) -> int:
     to_send = matches[:limit]
     deferred = matches[limit:]
 
-    for job, verdict in to_send:
-        telegram.send_job(job, verdict.reason)
+    # A failed send is logged and swallowed, so a wrong chat id — a channel the
+    # bot was never made an admin of, say — produced a green run that delivered
+    # nothing: the silent-failure shape this project keeps meeting. Track which
+    # ones actually landed, because only those may be marked seen.
+    attempted, to_send = to_send, []
+    undelivered = 0
+    for job, verdict in attempted:
+        if telegram.send_job(job, verdict.reason):
+            to_send.append((job, verdict))
+        else:
+            undelivered += 1
+
+    if undelivered:
+        # Not marked seen, so they are retried on the next run rather than
+        # lost, and the error fails the run so the workflow's alert fires.
+        _log.error(
+            "%d of %d message(s) could not be delivered to %s. They stay unseen "
+            "and will be retried. Check the chat id is right and that the bot "
+            "may post there: python -m jobradar --check-chat %s",
+            undelivered, len(attempted), telegram.chat_id, telegram.chat_id,
+        )
 
     if deferred:
         telegram.send_raw(
@@ -329,10 +534,25 @@ def main(argv=None) -> int:
     store.add_all(job.key for job, _ in to_send)
     store.add_all(job.key for job, _ in rejected)
 
+    # ---- heartbeat -------------------------------------------------------
+    # A run that sends nothing is indistinguishable, from the receiving end,
+    # from a run that never happened or one that died before sending. Both
+    # outages so far were reported by a human noticing the quiet. So: count
+    # consecutive silent runs, and after a day of them, break the silence on
+    # purpose. The message doubles as a health report — it names what was
+    # checked, so "nothing matched" is visibly different from "nothing worked".
+    silent_for = record_silence(store, delivered=bool(to_send or deferred))
+    if silent_for:
+        telegram.send_admin(heartbeat_message(silent_for, len(jobs), yields))
+        _log.info("sent heartbeat after %d silent run(s)", silent_for)
+
     if args.dry_run:
         _log.info("dry run — state not written, nothing sent")
     else:
         store.save()
 
     _log.info("done: %d message(s) delivered", telegram.sent)
-    return 0
+    # Non-zero on undelivered matches so the run goes red and the workflow's
+    # failure step reports it. State is saved first: the successful sends are
+    # recorded, the failed ones stay unseen for the next run.
+    return 1 if undelivered else 0

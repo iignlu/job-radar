@@ -51,6 +51,7 @@ class JSearchSource(Source):
         self.job_requirements = job_requirements
         self.num_pages = num_pages
         self._shape_logged = False
+        self._nesting_logged = False
         self._options_logged = False
 
     @property
@@ -76,6 +77,7 @@ class JSearchSource(Source):
 
     def fetch(self) -> list[Job]:
         jobs: list[Job] = []
+        answered = 0
         for query in self.queries:
             try:
                 payload = http.get_json(
@@ -93,6 +95,7 @@ class JSearchSource(Source):
                     _log.error("query %r failed, skipping: %s", query, exc)
                 continue
 
+            answered += 1
             records = self._records(payload)
             _log.info("query %r -> %d posting(s)", query, len(records))
             for item in records:
@@ -100,7 +103,83 @@ class JSearchSource(Source):
                     jobs.append(self._to_job(item))
                 except Exception as exc:  # one malformed record, not a dead run
                     _log.warning("skipping malformed posting: %s", exc)
+
+        # Every query answered, none produced a posting. That is possible on a
+        # quiet day but it is also what a broken parameter looks like, and the
+        # two are indistinguishable from the outside — which is precisely how
+        # an earlier outage stayed hidden for four runs. Say so at WARNING so
+        # it stands out in a log full of INFO, and name the next step.
+        if answered and not jobs:
+            _log.warning(
+                "jsearch: %d quer%s answered but returned 0 postings between "
+                "them (params: country=%s date_posted=%s%s). If this repeats "
+                "run `python -m jobradar --probe-jsearch` to test the "
+                "parameters one at a time.",
+                answered, "y" if answered == 1 else "ies",
+                self.country, self.date_posted,
+                f" job_requirements={self.job_requirements}"
+                if self.job_requirements else "",
+            )
         return jobs
+
+    def probe(self) -> None:
+        """Vary one parameter at a time and report what comes back.
+
+        Exists because "0 postings" carries no information about *why*. A
+        quiet day, a renamed field, a parameter the endpoint no longer honours
+        and an exhausted quota all look identical from the run log, and the
+        only way to tell them apart is to change one thing at a time and look.
+
+        Costs one request per row below, so it is a deliberate command rather
+        than something a scheduled run does.
+        """
+        query = self.queries[0] if self.queries else "software engineer"
+        base = {"query": query, "num_pages": 1, "country": self.country,
+                "date_posted": self.date_posted}
+
+        trials = [
+            ("what the bot sends today", dict(base)),
+            ("date_posted=week", dict(base, date_posted="week")),
+            ("date_posted=all", dict(base, date_posted="all")),
+            ("date_posted=all, bare query 'software engineer'",
+             dict(base, query="software engineer", date_posted="all")),
+            ("date_posted=all, no country param",
+             {"query": f"{query} in Saudi Arabia", "num_pages": 1,
+              "date_posted": "all"}),
+        ]
+
+        _log.info("probing %s — %d request(s)", api_url(), len(trials))
+        for label, params in trials:
+            try:
+                payload = http.get_json(
+                    api_url(), params=params, headers=self._headers(), retries=1
+                )
+            except HttpError as exc:
+                _log.error("%-46s ERROR %s", label, exc)
+                continue
+
+            data = payload.get("data")
+            if isinstance(data, dict):
+                shape = ", ".join(
+                    f"{k}={len(v) if isinstance(v, list) else type(v).__name__}"
+                    for k, v in data.items()
+                )
+                shape = f"data{{{shape}}}"
+            elif isinstance(data, list):
+                shape = f"data=list[{len(data)}]"
+            else:
+                shape = f"data={type(data).__name__}"
+
+            count = len(self._records(payload))
+            _log.info("%-46s -> %2d posting(s) | top-level=%s | %s",
+                      label, count, list(payload)[:8], shape)
+
+            # The first row that actually returns something is the answer, so
+            # show one title as proof the records are real postings.
+            if count:
+                first = self._records(payload)[0]
+                _log.info("%-46s    e.g. %r", "", str(
+                    self._pick(first, "job_title", "title", default="?"))[:70])
 
     def _records(self, payload: dict) -> list[dict]:
         """Pull the posting list out of a response.
@@ -117,19 +196,35 @@ class JSearchSource(Source):
         if isinstance(data, list):
             records = data
         elif isinstance(data, dict):
-            records = None
-            for key, value in data.items():
-                if isinstance(value, list) and (not value or isinstance(value[0], dict)):
-                    if not self._shape_logged:
-                        _log.info("postings are nested under data.%s", key)
-                    records = value
-                    break
-            if records is None:
+            # Pick the key holding the postings. Order matters: an empty list
+            # is accepted only as a last resort, because a response like
+            # {"filters": [], "jobs": [...]} would otherwise match `filters`
+            # first and report zero postings while the jobs sat one key over.
+            populated = [
+                (key, value) for key, value in data.items()
+                if isinstance(value, list) and value and isinstance(value[0], dict)
+            ]
+            empty = [
+                (key, value) for key, value in data.items()
+                if isinstance(value, list) and not value
+            ]
+            candidates = populated or empty
+            if not candidates:
                 _log.error(
                     "data is an object with keys %s, none holding a list of postings",
                     list(data)[:20],
                 )
                 return []
+
+            # Prefer a conventionally-named key when several qualify.
+            key, records = next(
+                (pair for pair in candidates if pair[0] in ("jobs", "results", "data")),
+                candidates[0],
+            )
+            if not self._nesting_logged:
+                _log.info("postings are nested under data.%s (%d record(s); "
+                          "data keys: %s)", key, len(records), list(data)[:20])
+                self._nesting_logged = True
         elif isinstance(payload.get("jobs"), list):
             records = payload["jobs"]
         else:

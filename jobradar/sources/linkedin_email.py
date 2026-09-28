@@ -243,7 +243,11 @@ class LinkedInEmailSource(Source):
                     _log.info("    RAW CONTEXT: %s", condensed[:1200])
 
             for job_id, card in postings.items():
-                url = card["url"]
+                # Canonical form rather than the tracked link from the mail.
+                # The id alone identifies the job, and the alert URL carries
+                # ~600 characters of per-recipient tracking that wraps badly
+                # and can be truncated into a dead link when forwarded.
+                url = f"https://www.linkedin.com/jobs/view/{job_id}/"
                 # Easy Apply means the application happens inside LinkedIn —
                 # no external site, no second signup. Worth surfacing, since a
                 # gated apply link is the main reason a matched job is useless.
