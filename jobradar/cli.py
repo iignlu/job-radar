@@ -63,6 +63,11 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="print your Telegram chat id (from getUpdates) and exit",
     )
     parser.add_argument(
+        "--explain", action="store_true",
+        help="judge every posting on offer and show why each is or is not a "
+             "match, ignoring seen state; sends nothing and writes no state",
+    )
+    parser.add_argument(
         "--say", metavar="TEXT", default=None,
         help="send one message to TELEGRAM_CHAT_ID and exit (Telegram HTML allowed)",
     )
@@ -156,6 +161,66 @@ def chat_id_for_run(configured: str, store, token: str, dry_run: bool = False,
     if chat_id:
         store.chat_id = chat_id
     return chat_id
+
+
+def explain(jobs) -> None:
+    """Census every fetched posting and say why each one is or is not a match.
+
+    Answers the question the run log cannot: "why so few today?". A normal run
+    only evaluates postings it has not seen before, so by the time the number
+    looks wrong, the evidence is already marked seen and gone. This re-judges
+    everything currently on offer, ignoring seen state entirely, and groups the
+    verdicts by the rule that produced them.
+
+    That distinction matters: a quiet day and an over-tight filter produce the
+    same small number at the end of a run, and only the breakdown tells them
+    apart. Sends nothing and writes no state.
+    """
+    from collections import Counter
+
+    layers = Counter()
+    accepted = []
+    for job in jobs:
+        verdict = evaluate(job, trust_source=job.source in config.PRE_FILTERED_SOURCES)
+        if verdict.accepted:
+            accepted.append(job)
+            continue
+        # Collapse the specific term out of the reason so that fifty postings
+        # rejected for fifty different senior titles read as one rule, not
+        # fifty. The rule is the actionable thing; the term is an example.
+        reason = verdict.reason
+        for prefix in ("title contains excluded term", "title says",
+                       "description demands", "employment type is",
+                       "requires", "location"):
+            if reason.startswith(prefix):
+                reason = prefix
+                break
+        layers[reason] += 1
+
+    total = len(jobs)
+    print()
+    print(f"CENSUS of {total} posting(s) currently on offer — seen state ignored")
+    print("=" * 66)
+    print(f"{'ACCEPTED':<46} {len(accepted):>5}  "
+          f"{len(accepted) / total * 100 if total else 0:>5.1f}%")
+    print("-" * 66)
+    for reason, count in layers.most_common():
+        print(f"{'rejected: ' + reason:<46} {count:>5}  "
+              f"{count / total * 100 if total else 0:>5.1f}%")
+    print("=" * 66)
+
+    if accepted:
+        print()
+        print("Every posting that WOULD be sent if none had been seen:")
+        for job in accepted[:40]:
+            print(f"  {(job.title or '?')[:58]:<58} [{job.source}]")
+        if len(accepted) > 40:
+            print(f"  ... and {len(accepted) - 40} more")
+
+    print()
+    print("Reading this: a large 'no software or data role in the title' count")
+    print("is normal — most of what the sources carry is not your field. A")
+    print("sudden jump in any OTHER row is where a filter has gone wrong.")
 
 
 def record_silence(store, delivered: bool) -> int:
@@ -379,7 +444,11 @@ def main(argv=None) -> int:
     # send, so --dry-run works with nothing but a RapidAPI key.
     try:
         sources = build_sources(args)
-        token = config.env("TELEGRAM_TOKEN", required=not args.dry_run)
+        # --explain never sends, so it must not demand a Telegram token: the
+        # whole point is that you can ask "why so few?" from anywhere, without
+        # credentials in hand.
+        sends = not (args.dry_run or args.explain)
+        token = config.env("TELEGRAM_TOKEN", required=sends)
         chat_id = config.env("TELEGRAM_CHAT_ID", required=False)
     except config.MissingSetting as exc:
         _log.error("%s", exc)
@@ -390,7 +459,7 @@ def main(argv=None) -> int:
     store = SeenStore(config.STATE_PATH, max_keys=config.MAX_SEEN_KEYS)
 
     try:
-        chat_id = chat_id_for_run(chat_id, store, token, dry_run=args.dry_run)
+        chat_id = chat_id_for_run(chat_id, store, token, dry_run=not sends)
     except ChatIdUnavailable as exc:
         _log.error("%s", exc)
         return 2
@@ -447,6 +516,10 @@ def main(argv=None) -> int:
     jobs = list(unique.values())
     if len(jobs) != len(fetched):
         _log.info("deduped %d -> %d posting(s)", len(fetched), len(jobs))
+
+    if args.explain:
+        explain(jobs)
+        return 0
 
     # ---- first run -------------------------------------------------------
     # CRITICAL: on a first run every posting in the window looks "new", so
