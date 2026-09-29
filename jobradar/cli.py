@@ -191,9 +191,9 @@ def explain(jobs) -> None:
         reason = verdict.reason
         for prefix in ("title contains excluded term", "title says",
                        "description demands", "employment type is",
-                       "requires", "location"):
+                       "requires", "location", "posted"):
             if reason.startswith(prefix):
-                reason = prefix
+                reason = "older than the freshness window" if prefix == "posted" else prefix
                 break
         layers[reason] += 1
 
