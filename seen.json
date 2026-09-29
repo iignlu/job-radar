@@ -1,8 +1,8 @@
 {
-  "updated": "2026-09-28T09:53:39+00:00",
-  "count": 1045,
+  "updated": "2026-09-29T09:55:18+00:00",
+  "count": 1054,
   "chat_id": "@A_jobradar",
-  "silent_runs": 1,
+  "silent_runs": 0,
   "keys": [
     "jsearch:K_hhtM2tDToq4iEiAAAAAA==",
     "jsearch:RBa7oJ_YUE5VPcBSAAAAAA==",
@@ -1048,6 +1048,15 @@
     "ats:recruitee:unifonic:2719283",
     "linkedin-email:4472425517",
     "linkedin-email:4471081121",
-    "ats:greenhouse:tamara:4980823101"
+    "ats:greenhouse:tamara:4980823101",
+    "linkedin-email:4470599556",
+    "ats:workable:lucidya:6FAFB24C93",
+    "ats:workable:salla:2B4600D833",
+    "ats:workable:salla:B1DB6B1A8A",
+    "ats:workable:bupa:F77CEC1C7A",
+    "ats:workable:bupa:7103BCB634",
+    "ats:workable:bupa:6F462ACA9E",
+    "ats:workable:bupa:87E12D47BE",
+    "linkedin-email:4472452110"
   ]
 }
