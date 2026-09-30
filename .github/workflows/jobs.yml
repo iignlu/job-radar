@@ -11,29 +11,29 @@ name: job-alerts
 
 on:
   schedule:
-    # 03:23, 06:23 and 09:23 UTC, Sunday–Thursday. Saudi Arabia is UTC+3, so
-    # 06:23, 09:23 and 12:23 local. GitHub cron is always UTC, no timezone.
+    # 06:23, 11:23 and 16:23 UTC, Sunday–Thursday. Saudi Arabia is UTC+3, so
+    # 09:23, 14:23 and 19:23 local. GitHub cron is always UTC, no timezone.
     #
-    # Two things shape these numbers, and neither is obvious:
+    # The minute is :23 rather than :00 deliberately: minute 0 is the most
+    # contended minute of the hour and GitHub queues free scheduled workflows
+    # behind it, which is a large part of why runs land hours late.
     #
-    # 1. GitHub runs free scheduled workflows LATE. Measured over the week of
-    #    21-24 September: every run fired 3-5 hours after its slot. The old
-    #    16:00 UTC run was landing at 19:30-20:00 UTC, i.e. 22:30 Riyadh --
-    #    alerts arriving when nobody can act on them, and a whole night's head
-    #    start lost against other applicants. So the schedule is set EARLY on
-    #    purpose: the aim is that even a 5-hour delay lands inside Saudi
-    #    working hours (worst case 11:23, 14:23, 17:23 local). Early is
-    #    harmless -- a notification waits -- while late is the whole problem.
+    # The HOURS, though, went to 03/06/09 for two days and were moved back.
+    # That experiment was meant to make even a 5-hour delay land inside Saudi
+    # working hours, and it did -- but it also made GitHub drop far more runs:
     #
-    # 2. Minute 0 is the most contended minute of the hour, which is most of
-    #    why the delay is that large. An off-the-hour minute queues behind far
-    #    less. Hence :23 rather than :00.
+    #     hours 06/11/16   2-3 scheduled runs landed per day
+    #     hours 03/06/09   0-1 scheduled runs landed per day
     #
-    # Still spaced 3 hours apart rather than clustered into one morning hour:
-    # runs that close together would find nothing new after the first, which
-    # both wastes JSearch quota and trips the silent-run heartbeat in
-    # config.py into firing on a perfectly healthy day.
-    - cron: "23 3,6,9 * * 0-4"
+    # Measured 27-30 September. A schedule that arrives at a good hour but only
+    # fires once, or not at all, is worse for the person waiting than one that
+    # fires reliably and sometimes arrives late. Reliability first.
+    #
+    # The cost is honest: the 16:23 slot plus GitHub's delay can still land at
+    # 19:23-21:00 Riyadh. That is earlier than the 22:30 it used to reach,
+    # because of the minute change, but it is not the morning-only delivery
+    # this was aiming for. GitHub's free tier does not offer that.
+    - cron: "23 6,11,16 * * 0-4"
 
   # Manual runs can widen the window without touching config. Useful on a
   # Friday/Saturday, when "today" is legitimately empty because the Saudi
