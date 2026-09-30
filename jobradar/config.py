@@ -375,11 +375,19 @@ HEARTBEAT_AFTER_SILENT_RUNS = 3
 # from you?" is answered in the message itself. Keep in step with the cron in
 # .github/workflows/jobs.yml — they are two statements of the same fact.
 #
-# Deliberately a WINDOW, not three clock times. The old wording promised
-# "09:00, 14:00 and 19:00" and the alerts were arriving 3-5 hours after that,
-# because GitHub queues free scheduled workflows. A stated time the bot cannot
-# keep is worse than no time at all: it teaches you to distrust the message.
-SCHEDULE_HUMAN = "three times each morning to early afternoon, Sunday–Thursday"
+# Deliberately vague, and "UP TO" three times rather than three. Two separate
+# promises were broken by being specific here:
+#
+#   "09:00, 14:00 and 19:00" -- alerts arrived 3-5 hours after those times,
+#   because GitHub queues free scheduled workflows behind minute 0.
+#
+#   "three times" -- GitHub drops scheduled runs on the free tier. Measured
+#   27-30 September, 1 to 3 of the day's three slots actually fired.
+#
+# A stated time the bot cannot keep is worse than no time at all: it teaches
+# you to distrust the message. Nothing is lost when a slot is dropped, because
+# unsent matches are never marked seen, so "up to" is the honest word.
+SCHEDULE_HUMAN = "up to three times a day, Sunday–Thursday"
 
 # Watchdog threshold, in hours. A run that never starts cannot report its own
 # failure — GitHub cancelled one after fifteen minutes without ever giving it
