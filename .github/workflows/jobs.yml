@@ -1,39 +1,41 @@
 # The scheduled alert run.
 #
-# QUOTA MATHS — this is what keeps the bot on the free tier:
-#   2 queries (config.QUERIES) x 3 runs/day x ~22 working days
-#     = 132 requests/month
-#   JSearch's free plan allows ~200/month, so there is headroom for manual
-#   workflow_dispatch runs and the occasional retry.
-#   Adding a third query pushes it to ~198/month — right at the ceiling. Add a
-#   fourth and you are over it. Change QUERIES and this schedule together.
+# NO QUOTA MATHS ANY MORE, and that is the point. Every source this now uses —
+# the ATS boards and your own LinkedIn alert mail — is free per request, so the
+# number of slots below is limited only by politeness. JSearch, the one metered
+# source, is off (config.ENABLE_JSEARCH): it supplied about 1% of postings and
+# its ~200/month ceiling was the only reason this schedule was capped at three
+# slots. Turn it back on and the cap returns; the flag and this cron are one
+# decision, not two.
 name: job-alerts
 
 on:
   schedule:
-    # 06:23, 11:23 and 16:23 UTC, Sunday–Thursday. Saudi Arabia is UTC+3, so
-    # 09:23, 14:23 and 19:23 local. GitHub cron is always UTC, no timezone.
+    # 02:17, 04:17, 06:17, 08:17 and 10:17 UTC, Sunday–Thursday.
+    # Saudi Arabia is UTC+3, so 05:17 to 13:17 local.
     #
-    # The minute is :23 rather than :00 deliberately: minute 0 is the most
-    # contended minute of the hour and GitHub queues free scheduled workflows
-    # behind it, which is a large part of why runs land hours late.
+    # Five slots, all in the first half of the day, for one reason: GitHub's
+    # free scheduled runs are neither punctual nor reliable, and two different
+    # 3-slot schedules both failed, in opposite ways.
     #
-    # The HOURS, though, went to 03/06/09 for two days and were moved back.
-    # That experiment was meant to make even a 5-hour delay land inside Saudi
-    # working hours, and it did -- but it also made GitHub drop far more runs:
+    #     hours 06/11/16   delays of 3.5-6.3h; the last slot landed 01:42 local
+    #     hours 03/06/09   landed inside working hours, but 0-1 slots fired
     #
-    #     hours 06/11/16   2-3 scheduled runs landed per day
-    #     hours 03/06/09   0-1 scheduled runs landed per day
+    # Measured 27 September - 6 October. Tuning three slots cannot fix this: a
+    # single slot is a coin flip, and whichever hour it is given, it is either
+    # dropped or late. Five slots is the fix — if GitHub drops half of them,
+    # three still land, and the day is covered rather than resting on one run.
     #
-    # Measured 27-30 September. A schedule that arrives at a good hour but only
-    # fires once, or not at all, is worse for the person waiting than one that
-    # fires reliably and sometimes arrives late. Reliability first.
+    # Why they stop at 10:17 UTC: the worst delay observed is about 6.5 hours,
+    # so the LAST slot can still arrive by roughly 16:47 local. Nothing here
+    # can land at night, which is the failure that started all of this. Early
+    # is harmless — a notification waits — while late is the whole problem.
     #
-    # The cost is honest: the 16:23 slot plus GitHub's delay can still land at
-    # 19:23-21:00 Riyadh. That is earlier than the 22:30 it used to reach,
-    # because of the minute change, but it is not the morning-only delivery
-    # this was aiming for. GitHub's free tier does not offer that.
-    - cron: "23 6,11,16 * * 0-4"
+    # Minute :17 rather than :00 because minute 0 is the most contended minute
+    # of the hour and queues longest.
+    #
+    # This costs nothing: see the note on quota above.
+    - cron: "17 2,4,6,8,10 * * 0-4"
 
   # Manual runs can widen the window without touching config. Useful on a
   # Friday/Saturday, when "today" is legitimately empty because the Saudi
