@@ -99,13 +99,22 @@ ATS_BOARDS = [
 
 ENABLE_ATS = True
 
-# JSearch is the only metered source and the only one that has ever gone
-# quiet on us. Set this to False to run on the free sources alone — the ATS
-# boards and your LinkedIn alerts supply ~300 postings a run between them and
-# produce every alert you currently receive, so switching it off costs less
-# than it sounds like. Left on by default: when JSearch works it reaches
-# postings the other two never see.
-ENABLE_JSEARCH = True
+# OFF. Not because it is broken — because its quota was the one thing stopping
+# the bot from running often enough to be useful.
+#
+# Measured 6 October: ats=196, linkedin-email=149, jsearch=4. JSearch supplies
+# about 1% of the postings and is the ONLY source with a monthly limit (~200
+# requests). That limit capped the schedule at 3 runs a day, and GitHub drops
+# or delays enough of those that 1-2 actually land, sometimes at 01:42 local.
+#
+# Dropping 1% of supply to lift the cap entirely is a good trade: the ATS
+# boards and LinkedIn alerts cost nothing per request, so the schedule can now
+# have as many slots as it likes and still be free.
+#
+# Set back to True if the quota ever stops mattering, but move the cron in
+# .github/workflows/jobs.yml back in step with it — the slot count and this
+# flag are one decision.
+ENABLE_JSEARCH = False
 
 # --------------------------------------------------------------------------
 # LinkedIn, via your own job-alert emails
@@ -367,9 +376,14 @@ MAX_MESSAGES_PER_RUN = 40
 # spotted by a human noticing the quiet rather than by the system.
 #
 # After this many consecutive runs that delivered nothing, say so out loud.
-# 3 is one full working day: quiet enough not to nag, frequent enough that a
-# genuine outage surfaces the same day it starts.
-HEARTBEAT_AFTER_SILENT_RUNS = 3
+#
+# Was 3, when the schedule had 3 slots and 3 silent runs meant a whole working
+# day. The schedule now has 5 slots, and most of them legitimately find nothing
+# new — the sources carry the same ~250 postings until a company posts a fresh
+# one. At 3 this would fire almost daily and become noise, which is the one
+# thing a health signal must not be. 8 is roughly two working days of genuine
+# silence.
+HEARTBEAT_AFTER_SILENT_RUNS = 8
 
 # Plain-language schedule, quoted in the heartbeat so "when should I next hear
 # from you?" is answered in the message itself. Keep in step with the cron in
@@ -387,7 +401,7 @@ HEARTBEAT_AFTER_SILENT_RUNS = 3
 # A stated time the bot cannot keep is worse than no time at all: it teaches
 # you to distrust the message. Nothing is lost when a slot is dropped, because
 # unsent matches are never marked seen, so "up to" is the honest word.
-SCHEDULE_HUMAN = "up to three times a day, Sunday–Thursday"
+SCHEDULE_HUMAN = "several times each morning and midday, Sunday–Thursday"
 
 # Watchdog threshold, in hours. A run that never starts cannot report its own
 # failure — GitHub cancelled one after fifteen minutes without ever giving it
