@@ -1,8 +1,8 @@
 {
-  "updated": "2026-10-07T08:48:57+00:00",
-  "count": 1142,
+  "updated": "2026-10-07T17:27:50+00:00",
+  "count": 1144,
   "chat_id": "@A_jobradar",
-  "silent_runs": 0,
+  "silent_runs": 1,
   "keys": [
     "jsearch:K_hhtM2tDToq4iEiAAAAAA==",
     "jsearch:RBa7oJ_YUE5VPcBSAAAAAA==",
@@ -1145,6 +1145,8 @@
     "linkedin-email:4476170837",
     "linkedin-email:4475582719",
     "linkedin-email:4476180394",
-    "linkedin-email:4476174774"
+    "linkedin-email:4476174774",
+    "ats:workable:foodics:78F8554CB7",
+    "ats:recruitee:unifonic:2770523"
   ]
 }
