@@ -1,8 +1,8 @@
 {
-  "updated": "2026-11-09T09:55:16+00:00",
-  "count": 1539,
+  "updated": "2026-11-09T20:49:52+00:00",
+  "count": 1541,
   "chat_id": "@A_jobradar",
-  "silent_runs": 0,
+  "silent_runs": 1,
   "keys": [
     "jsearch:K_hhtM2tDToq4iEiAAAAAA==",
     "jsearch:RBa7oJ_YUE5VPcBSAAAAAA==",
@@ -1542,6 +1542,8 @@
     "ats:workable:foodics:FAAA8D1F39",
     "linkedin-email:4486684817",
     "linkedin-email:4486696426",
-    "linkedin-email:4479777807"
+    "linkedin-email:4479777807",
+    "ats:workable:foodics:FB74E1BE9C",
+    "ats:ashby:leantech:3a4a08a0-5d53-4312-9214-8c3fa695b67d"
   ]
 }
