@@ -1,8 +1,8 @@
 {
-  "updated": "2026-11-12T09:56:47+00:00",
-  "count": 1578,
+  "updated": "2026-11-12T18:23:32+00:00",
+  "count": 1580,
   "chat_id": "@A_jobradar",
-  "silent_runs": 0,
+  "silent_runs": 1,
   "keys": [
     "jsearch:K_hhtM2tDToq4iEiAAAAAA==",
     "jsearch:RBa7oJ_YUE5VPcBSAAAAAA==",
@@ -1581,6 +1581,8 @@
     "linkedin-email:4488689159",
     "linkedin-email:4489945298",
     "linkedin-email:4489907834",
-    "linkedin-email:4489982919"
+    "linkedin-email:4489982919",
+    "ats:workable:foodics:A165F5C263",
+    "ats:workable:bupa:7DF22B5553"
   ]
 }
